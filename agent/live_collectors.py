@@ -25,6 +25,7 @@ collector's output straight into the matching score_*() call.
 """
 from __future__ import annotations
 
+import os
 import platform
 import re
 import subprocess
@@ -33,11 +34,13 @@ import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Deque, Dict, List, Optional
+from typing import Callable, Deque, Dict, List, Optional, Union
 
 import psutil
 from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+from watchdog.events import FileSystemEventHandler, FileSystemEvent
+
+import ember_features  # local module -- lief-based EMBER extractor (agent/ember_features.py)
 
 IS_LINUX = platform.system() == "Linux"
 IS_WINDOWS = platform.system() == "Windows"
@@ -300,17 +303,27 @@ class NetworkFlowCollector:
 
 class PEFileCollector(FileSystemEventHandler):
     """
-    Watches a directory for new/modified PE files (.exe, .dll) and extracts
-    EMBER-compatible features using the official `ember` library's
-    PEFeatureExtractor -- this guarantees the feature names/order match what
-    the model was trained on (do not hand-roll this extraction).
+    Watches a directory for new/modified PE files (.exe, .dll, .sys) and
+    extracts EMBER-schema features via ember_features.py -- a lief-based
+    reimplementation of the EMBER feature scheme. We do NOT use the
+    official `ember` pip package: it hard-pins to lief==0.9.0 and is
+    broken on modern Python, which is exactly what was blocking this
+    collector before. See ember_features.py's module docstring for the
+    full feature-group breakdown (2381 dims, canonical EMBER order).
 
-    Install: pip install ember-malware-analysis  (or the `ember` package
-    matching whatever was used in ml_notebooks/ember/ember.ipynb -- check
-    that notebook's imports to confirm the exact package name/version).
+    `feature_names` should be the model's REAL expected column order
+    (e.g. `engine._ember_features` from the loaded model export) so the
+    extracted vector lines up correctly with score_file()'s reindex,
+    regardless of whether those columns happen to be named descriptively
+    or as generic indices. Falls back to ember_features.FEATURE_NAMES if
+    not supplied -- but always pass the real list in production, or
+    scores will silently come out wrong (reindexed to mostly zeros).
 
     Usage:
-        collector = PEFileCollector(on_new_pe_features=my_callback)
+        collector = PEFileCollector(
+            on_new_pe_features=my_callback,
+            feature_names=engine._ember_features,
+        )
         observer = Observer()
         observer.schedule(collector, path="C:/Users/you/Downloads", recursive=False)
         observer.start()
@@ -318,43 +331,94 @@ class PEFileCollector(FileSystemEventHandler):
 
     PE_EXTENSIONS = {".exe", ".dll", ".sys"}
 
-    def __init__(self, on_new_pe_features: Callable[[Dict[str, float]], None]):
+    # File-stability guard: don't extract from a file that's still being
+    # written (e.g. a download in progress) -- wait for its size to stop
+    # changing first, same debounce logic as ember_telemetry_monitor.py.
+    STABILIZE_POLL = 0.25
+    STABILIZE_MAX_WAIT = 15.0
+    STABILIZE_STABLE_READS = 3
+
+    def __init__(
+        self,
+        on_new_pe_features: Callable[[Dict[str, float], Dict], None],
+        feature_names: Optional[List[str]] = None,
+        debounce_seconds: float = 3.0,
+    ):
         super().__init__()
         self._callback = on_new_pe_features
-        self._extractor = None  # lazy import/init, see _get_extractor()
+        self._feature_names = feature_names or ember_features.FEATURE_NAMES
+        self._debounce_seconds = debounce_seconds
+        self._last_scanned: Dict[str, float] = {}
 
-    def _get_extractor(self):
-        if self._extractor is None:
-            import ember  # pip install ember (matches training notebook)
-            self._extractor = ember.PEFeatureExtractor()
-        return self._extractor
+    def _wait_until_stable(self, path: str) -> bool:
+        deadline = time.time() + self.STABILIZE_MAX_WAIT
+        last_size, stable_reads = -1, 0
+        while time.time() < deadline:
+            try:
+                size = Path(path).stat().st_size
+            except FileNotFoundError:
+                return False  # genuinely gone (e.g. temp download artifact cleaned up)
+            except OSError:
+                # Transient lock -- e.g. Windows Defender / another process
+                # briefly holding the file right after it's written. Don't
+                # give up, just wait and retry until the deadline.
+                stable_reads = 0
+                time.sleep(self.STABILIZE_POLL)
+                continue
+            if size == last_size:
+                stable_reads += 1
+                if stable_reads >= self.STABILIZE_STABLE_READS:
+                    return True
+            else:
+                stable_reads = 0
+                last_size = size
+            time.sleep(self.STABILIZE_POLL)
+        return False
 
     def _handle_file(self, path: str):
         p = Path(path)
         if p.suffix.lower() not in self.PE_EXTENSIONS:
             return
+
+        now = time.time()
+        last = self._last_scanned.get(path)
+        if last is not None and (now - last) < self._debounce_seconds:
+            return  # collapse create+modify bursts from one copy/save into one scan
+        self._last_scanned[path] = now
+
+        if not self._wait_until_stable(path):
+            print(f"[ember_collector] Skipped (file never stabilised): {path}")
+            return
         try:
-            raw_bytes = p.read_bytes()
-            extractor = self._get_extractor()
-            # extractor.feature_vector() returns a numpy array in EMBER's
-            # fixed feature order; we need a NAME->value dict because
-            # score_file() reindexes by name against export["features"].
-            vector = extractor.feature_vector(raw_bytes)
-            feature_names = extractor.feature_names if hasattr(
-                extractor, "feature_names"
-            ) else [f"f{i}" for i in range(len(vector))]
-            pe_features = {name: float(val) for name, val in zip(feature_names, vector)}
-            self._callback(pe_features)
+            vector, meta = ember_features.extract_from_path(path)
+        except ValueError:
+            print(f"[ember_collector] Skipped (not a valid PE): {path}")
+            return
         except Exception as exc:
             print(f"[ember_collector] Failed to extract features from {path}: {exc}")
+            return
 
-    def on_created(self, event):
-        if not event.is_directory:
-            self._handle_file(event.src_path)
+        if len(vector) != len(self._feature_names):
+            print(
+                f"[ember_collector] WARNING: extracted {len(vector)} features but "
+                f"model expects {len(self._feature_names)} -- names will misalign. "
+                f"Run diagnostics/check_ember_feature_alignment.py before trusting scores."
+            )
+        pe_features = dict(zip(self._feature_names, vector))
+        meta["file_path"] = path
+        self._callback(pe_features, meta)
 
-    def on_modified(self, event):
+    @staticmethod
+    def _as_str(path: Union[str, bytes]) -> str:
+        return os.fsdecode(path) if isinstance(path, bytes) else path
+
+    def on_created(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
-            self._handle_file(event.src_path)
+            self._handle_file(self._as_str(event.src_path))
+
+    def on_modified(self, event: FileSystemEvent) -> None:
+        if not event.is_directory:
+            self._handle_file(self._as_str(event.src_path))
 
 
 # ===========================================================================
@@ -434,10 +498,10 @@ class HDFSLogCollector(FileSystemEventHandler):
         self._stop.set()
 
     # watchdog handler: tail newly appended lines on modify
-    def on_modified(self, event):
+    def on_modified(self, event: FileSystemEvent) -> None:
         if event.is_directory:
             return
-        path = event.src_path
+        path = os.fsdecode(event.src_path) if isinstance(event.src_path, bytes) else event.src_path
         try:
             with open(path, "r", errors="ignore") as f:
                 f.seek(self._offsets.get(path, 0))

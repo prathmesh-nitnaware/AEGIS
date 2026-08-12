@@ -14,8 +14,11 @@ WHAT WILL WORK IMMEDIATELY (no extra setup):
     - Zero-Day      (already proven working in your terminal)
     - CICIDS        (model file confirmed present -- should now load)
 
+    - EMBER         (fixed -- was gated behind a broken `import ember`; now
+                     uses ember_features.py, place it in agent/ alongside
+                     this file. Just needs PE_WATCH_DIR below to exist.)
+
 WHAT NEEDS ONE-TIME SETUP FIRST (instructions printed at startup if missing):
-    - EMBER         -> pip install ember-model  (or whatever ember.ipynb used)
     - HDFS          -> point HDFS_LOG_PATH below at a real log file
     - Windows Adv.  -> install + configure Sysmon first (see docstring)
 """
@@ -134,27 +137,28 @@ threading.Thread(target=network_loop, daemon=True).start()
 #    and a real folder to watch for new/modified .exe/.dll files.
 # ===========================================================================
 
-def handle_pe_features(pe_features: dict):
+def handle_pe_features(pe_features: dict, meta: dict):
     score = engine.score_file(pe_features)
     if score is not None:
         verdict = engine.get_verdict(score)
-        print(f"[ember]      new PE file -> {score:.3f} ({verdict})")
-        save_event("ember", score, verdict)
+        fname = Path(meta["file_path"]).name
+        print(f"[ember]      {fname:<25} sha256={meta['sha256'][:12]}... -> {score:.3f} ({verdict})")
+        save_event("ember", score, verdict, file_path=meta["file_path"], sha256=meta["sha256"])
 
 
-try:
-    import ember  # noqa: F401
-    pe_dir = Path(PE_WATCH_DIR.replace("%USERNAME%", Path.home().name))
-    if pe_dir.exists():
-        pe_collector = PEFileCollector(on_new_pe_features=handle_pe_features)
-        pe_observer = Observer()
-        pe_observer.schedule(pe_collector, path=str(pe_dir), recursive=False)
-        pe_observer.start()
-        print(f"[run_all] EMBER collector watching: {pe_dir}")
-    else:
-        print(f"[run_all] EMBER SKIPPED -- watch folder does not exist: {pe_dir}")
-except ImportError:
-    print("[run_all] EMBER SKIPPED -- run: pip install ember  (then re-run this script)")
+pe_dir = Path(PE_WATCH_DIR.replace("%USERNAME%", Path.home().name))
+if pe_dir.exists():
+    pe_collector = PEFileCollector(
+        on_new_pe_features=handle_pe_features,
+        feature_names=getattr(engine, "_ember_features", None),
+    )
+    pe_observer = Observer()
+    pe_observer.schedule(pe_collector, path=str(pe_dir), recursive=False)
+    pe_observer.start()
+    print(f"[run_all] EMBER collector watching: {pe_dir}")
+else:
+    print(f"[run_all] EMBER SKIPPED -- watch folder does not exist: {pe_dir}")
+    print("[run_all] Fix: create that folder, or edit PE_WATCH_DIR at the top of this file.")
 
 
 # ===========================================================================
