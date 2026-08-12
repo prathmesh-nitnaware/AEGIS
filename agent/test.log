@@ -1,0 +1,343 @@
+081110 220145 INFO dfs.DataNode: Receiving block blk_-9988776655 src: /10.0.0.2:50010
+081110 220146 INFO dfs.DataNode: PacketResponder for block blk_-9988776655 terminating081110 120345 INFO dfs.DataNode: Receiving block blk_-1608999600000000210 src: /10.0.0.191:50010
+081110 153332 INFO dfs.DataNode: Receiving block blk_-1608999600000000210 src: /10.0.0.22:50010
+081110 113022 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000000210
+081110 203000 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000000210 terminating
+081110 121432 INFO dfs.DataNode: Receiving block blk_-1608999600000000880 src: /10.0.0.79:50010
+081110 224103 INFO dfs.DataNode: Receiving block blk_-1608999600000000880 src: /10.0.0.215:50010
+081110 125055 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000000880
+081110 153045 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000000880 terminating
+081110 143314 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000001796 on unknown datanode
+081110 213322 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000001796 took 15000ms
+081110 223151 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000001796 took 15000ms
+081110 183441 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000001796 terminating
+081110 115240 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000002080 on unknown datanode
+081110 214255 ERROR dfs.DataNode: Exception writing block blk_-1608999600000002080: java.io.IOException
+081110 184021 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000002080 terminating
+081110 230353 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000002373 terminating
+081110 115243 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000002373
+081110 171201 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000002373 terminating
+081110 170424 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000002373 terminating
+081110 190440 ERROR dfs.DataNode: Exception writing block blk_-1608999600000002460: java.io.IOException
+081110 225203 ERROR dfs.DataNode: Exception writing block blk_-1608999600000002460: java.io.IOException
+081110 231431 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000002460 terminating
+081110 120345 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000003163 on unknown datanode
+081110 184143 ERROR dfs.DataNode: Exception writing block blk_-1608999600000003163: java.io.IOException
+081110 152031 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000003163 terminating
+081110 234431 INFO dfs.DataNode: Receiving block blk_-1608999600000003569 src: /10.0.0.51:50010
+081110 172353 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000003569
+081110 145103 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000003569 terminating
+081110 131304 INFO dfs.DataNode: Receiving block blk_-1608999600000004301 src: /10.0.0.125:50010
+081110 162043 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000004301 terminating
+081110 200533 INFO dfs.DataNode: Receiving block blk_-1608999600000004301 src: /10.0.0.230:50010
+081110 141124 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000004301 terminating
+081110 135102 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000005015 terminating
+081110 204242 INFO dfs.DataNode: Receiving block blk_-1608999600000005015 src: /10.0.0.250:50010
+081110 142132 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000005015 terminating
+081110 150105 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000005457 on unknown datanode
+081110 152245 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000005457 on unknown datanode
+081110 232532 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000005457 took 15000ms
+081110 131124 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000005457 terminating
+081110 171222 ERROR dfs.DataNode: Exception writing block blk_-1608999600000005467: java.io.IOException
+081110 100453 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000005467 on unknown datanode
+081110 141002 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000005467 took 15000ms
+081110 134323 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000005467 terminating
+081110 175004 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000006148
+081110 205322 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000006148 terminating
+081110 165104 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000006148 terminating
+081110 195352 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000006733 terminating
+081110 100304 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000006733
+081110 134013 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000006733
+081110 112041 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000006733 terminating
+081110 102022 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000007129 terminating
+081110 143255 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000007129
+081110 225310 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000007129 terminating
+081110 185004 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000007296
+081110 111452 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000007296
+081110 161241 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000007296 terminating
+081110 125022 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000007626
+081110 194143 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000007626
+081110 124051 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000007626 terminating
+081110 123255 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000007723
+081110 212554 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000007723
+081110 122431 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000007723 terminating
+081110 221412 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000007723 terminating
+081110 215013 INFO dfs.DataNode: Receiving block blk_-1608999600000008651 src: /10.0.0.164:50010
+081110 153520 INFO dfs.DataNode: Receiving block blk_-1608999600000008651 src: /10.0.0.118:50010
+081110 180234 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000008651 terminating
+081110 130325 INFO dfs.DataNode: Receiving block blk_-1608999600000008937 src: /10.0.0.91:50010
+081110 142504 INFO dfs.DataNode: Receiving block blk_-1608999600000008937 src: /10.0.0.213:50010
+081110 232043 INFO dfs.DataNode: Receiving block blk_-1608999600000008937 src: /10.0.0.254:50010
+081110 112232 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000008937 terminating
+081110 221253 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000009117 took 15000ms
+081110 181514 ERROR dfs.DataNode: Exception writing block blk_-1608999600000009117: java.io.IOException
+081110 174104 ERROR dfs.DataNode: Exception writing block blk_-1608999600000009117: java.io.IOException
+081110 231153 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000009117 terminating
+081110 173515 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000009485 took 15000ms
+081110 104041 ERROR dfs.DataNode: Exception writing block blk_-1608999600000009485: java.io.IOException
+081110 155034 ERROR dfs.DataNode: Exception writing block blk_-1608999600000009485: java.io.IOException
+081110 102341 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000009485 terminating
+081110 142052 ERROR dfs.DataNode: Exception writing block blk_-1608999600000009927: java.io.IOException
+081110 223454 ERROR dfs.DataNode: Exception writing block blk_-1608999600000009927: java.io.IOException
+081110 201503 ERROR dfs.DataNode: Exception writing block blk_-1608999600000009927: java.io.IOException
+081110 120241 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000009927 terminating
+081110 213434 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000010745 took 15000ms
+081110 210201 ERROR dfs.DataNode: Exception writing block blk_-1608999600000010745: java.io.IOException
+081110 225453 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000010745 on unknown datanode
+081110 210233 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000010745 terminating
+081110 202125 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000010837 terminating
+081110 220324 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000010837
+081110 210211 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000010837 terminating
+081110 191252 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000011281
+081110 143551 INFO dfs.DataNode: Receiving block blk_-1608999600000011281 src: /10.0.0.86:50010
+081110 131445 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000011281
+081110 163204 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000011281 terminating
+081110 172021 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000011902 took 15000ms
+081110 110114 ERROR dfs.DataNode: Exception writing block blk_-1608999600000011902: java.io.IOException
+081110 221430 ERROR dfs.DataNode: Exception writing block blk_-1608999600000011902: java.io.IOException
+081110 210213 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000011902 terminating
+081110 155413 INFO dfs.DataNode: Receiving block blk_-1608999600000012363 src: /10.0.0.105:50010
+081110 103542 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000012363
+081110 153033 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000012363 terminating
+081110 182022 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000012435 took 15000ms
+081110 175021 ERROR dfs.DataNode: Exception writing block blk_-1608999600000012435: java.io.IOException
+081110 212123 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000012435 terminating
+081110 101534 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000012851 on unknown datanode
+081110 123343 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000012851 took 15000ms
+081110 151513 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000012851 terminating
+081110 111521 INFO dfs.DataNode: Receiving block blk_-1608999600000013336 src: /10.0.0.232:50010
+081110 201053 INFO dfs.DataNode: Receiving block blk_-1608999600000013336 src: /10.0.0.163:50010
+081110 102002 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000013336 terminating
+081110 232312 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000013336 terminating
+081110 130151 INFO dfs.DataNode: Receiving block blk_-1608999600000014047 src: /10.0.0.82:50010
+081110 193333 INFO dfs.DataNode: Receiving block blk_-1608999600000014047 src: /10.0.0.218:50010
+081110 232422 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000014047 terminating
+081110 203214 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000014224 terminating
+081110 170231 INFO dfs.DataNode: Receiving block blk_-1608999600000014224 src: /10.0.0.145:50010
+081110 174151 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000014224 terminating
+081110 173442 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000014346 terminating
+081110 162431 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000014346 terminating
+081110 224035 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000014346 terminating
+081110 172231 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000015160 terminating
+081110 112213 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000015160 terminating
+081110 161311 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000015160 terminating
+081110 183302 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000015213 on unknown datanode
+081110 194310 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000015213 took 15000ms
+081110 135215 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000015213 terminating
+081110 120534 INFO dfs.DataNode: Receiving block blk_-1608999600000015550 src: /10.0.0.231:50010
+081110 221430 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000015550 terminating
+081110 103111 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000015550 terminating
+081110 205502 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000016238
+081110 184230 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000016238 terminating
+081110 222334 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000016238 terminating
+081110 145444 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000017050 on unknown datanode
+081110 164252 ERROR dfs.DataNode: Exception writing block blk_-1608999600000017050: java.io.IOException
+081110 200330 ERROR dfs.DataNode: Exception writing block blk_-1608999600000017050: java.io.IOException
+081110 145452 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000017050 terminating
+081110 214301 ERROR dfs.DataNode: Exception writing block blk_-1608999600000017927: java.io.IOException
+081110 160000 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000017927 took 15000ms
+081110 173451 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000017927 on unknown datanode
+081110 175331 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000017927 terminating
+081110 173131 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000018638
+081110 221544 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000018638
+081110 173141 INFO dfs.DataNode: Receiving block blk_-1608999600000018638 src: /10.0.0.45:50010
+081110 100434 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000018638 terminating
+081110 231504 ERROR dfs.DataNode: Exception writing block blk_-1608999600000019184: java.io.IOException
+081110 202054 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000019184 took 15000ms
+081110 100120 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000019184 terminating
+081110 213102 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000019964
+081110 203325 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000019964
+081110 122015 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000019964 terminating
+081110 133310 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000020686 took 15000ms
+081110 135144 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000020686 on unknown datanode
+081110 164040 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000020686 terminating
+081110 220314 INFO dfs.DataNode: Receiving block blk_-1608999600000021444 src: /10.0.0.238:50010
+081110 201111 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000021444 terminating
+081110 230450 INFO dfs.DataNode: Receiving block blk_-1608999600000021444 src: /10.0.0.28:50010
+081110 150403 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000021444 terminating
+081110 213223 INFO dfs.DataNode: Receiving block blk_-1608999600000021803 src: /10.0.0.226:50010
+081110 184521 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000021803 terminating
+081110 193152 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000021803 terminating
+081110 200034 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000022662 terminating
+081110 133212 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000022662
+081110 155030 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000022662
+081110 214145 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000022662 terminating
+081110 233131 INFO dfs.DataNode: Receiving block blk_-1608999600000023251 src: /10.0.0.32:50010
+081110 185215 INFO dfs.DataNode: Receiving block blk_-1608999600000023251 src: /10.0.0.127:50010
+081110 104230 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000023251 terminating
+081110 194350 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000023251 terminating
+081110 203033 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000023296
+081110 213501 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000023296 terminating
+081110 124205 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000023296 terminating
+081110 142410 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000023716 terminating
+081110 134454 INFO dfs.DataNode: Receiving block blk_-1608999600000023716 src: /10.0.0.186:50010
+081110 121143 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000023716
+081110 223120 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000023716 terminating
+081110 114001 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000023811
+081110 170152 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000023811
+081110 124320 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000023811
+081110 211222 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000023811 terminating
+081110 170434 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000024718
+081110 231021 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000024718
+081110 150204 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000024718 terminating
+081110 120421 INFO dfs.DataNode: Receiving block blk_-1608999600000024789 src: /10.0.0.26:50010
+081110 210314 INFO dfs.DataNode: Receiving block blk_-1608999600000024789 src: /10.0.0.48:50010
+081110 123540 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000024789 terminating
+081110 165410 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000025161 terminating
+081110 223312 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000025161 terminating
+081110 134044 INFO dfs.DataNode: Receiving block blk_-1608999600000025161 src: /10.0.0.64:50010
+081110 172104 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000025161 terminating
+081110 231505 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000026100 terminating
+081110 125340 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000026100
+081110 144525 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000026100 terminating
+081110 125452 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000026100 terminating
+081110 100201 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000026664 took 15000ms
+081110 181140 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000026664 took 15000ms
+081110 203253 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000026664 terminating
+081110 151431 INFO dfs.DataNode: Receiving block blk_-1608999600000027363 src: /10.0.0.71:50010
+081110 142234 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000027363 terminating
+081110 111413 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000027363 terminating
+081110 221033 INFO dfs.DataNode: Receiving block blk_-1608999600000028331 src: /10.0.0.58:50010
+081110 185303 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000028331 terminating
+081110 132204 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000028331 terminating
+081110 195351 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000028331 terminating
+081110 111203 INFO dfs.DataNode: Receiving block blk_-1608999600000029317 src: /10.0.0.164:50010
+081110 184110 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000029317 terminating
+081110 124051 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000029317 terminating
+081110 131005 INFO dfs.DataNode: Receiving block blk_-1608999600000029465 src: /10.0.0.59:50010
+081110 212104 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000029465
+081110 193545 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000029465 terminating
+081110 114103 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000029465 terminating
+081110 154422 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000029840 terminating
+081110 105200 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000029840
+081110 214125 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000029840
+081110 184511 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000029840 terminating
+081110 205444 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000030526 took 15000ms
+081110 234430 ERROR dfs.DataNode: Exception writing block blk_-1608999600000030526: java.io.IOException
+081110 181420 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000030526 terminating
+081110 203141 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000031190
+081110 154442 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000031190
+081110 234040 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000031190 terminating
+081110 162230 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000031640
+081110 171123 INFO dfs.DataNode: Receiving block blk_-1608999600000031640 src: /10.0.0.13:50010
+081110 155040 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000031640 terminating
+081110 130224 INFO dfs.DataNode: Receiving block blk_-1608999600000032494 src: /10.0.0.233:50010
+081110 214524 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000032494
+081110 173220 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000032494 terminating
+081110 155530 INFO dfs.DataNode: Receiving block blk_-1608999600000033192 src: /10.0.0.193:50010
+081110 121104 INFO dfs.DataNode: Receiving block blk_-1608999600000033192 src: /10.0.0.10:50010
+081110 234242 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000033192 terminating
+081110 114411 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000033923 terminating
+081110 221200 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000033923 terminating
+081110 215041 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000033923 terminating
+081110 200300 INFO dfs.DataNode: Receiving block blk_-1608999600000034039 src: /10.0.0.239:50010
+081110 105322 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000034039 terminating
+081110 181342 INFO dfs.DataNode: Receiving block blk_-1608999600000034039 src: /10.0.0.145:50010
+081110 180325 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000034039 terminating
+081110 162250 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000034362 on unknown datanode
+081110 173353 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000034362 on unknown datanode
+081110 192001 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000034362 terminating
+081110 221433 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000034505
+081110 152513 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000034505
+081110 144241 INFO dfs.DataNode: Receiving block blk_-1608999600000034505 src: /10.0.0.70:50010
+081110 202503 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000034505 terminating
+081110 232400 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000035016 terminating
+081110 212302 INFO dfs.DataNode: Receiving block blk_-1608999600000035016 src: /10.0.0.8:50010
+081110 125124 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000035016 terminating
+081110 165344 INFO dfs.DataNode: Receiving block blk_-1608999600000035232 src: /10.0.0.38:50010
+081110 161444 INFO dfs.DataNode: Receiving block blk_-1608999600000035232 src: /10.0.0.225:50010
+081110 145432 INFO dfs.DataNode: Receiving block blk_-1608999600000035232 src: /10.0.0.157:50010
+081110 122145 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000035232 terminating
+081110 224513 ERROR dfs.DataNode: Exception writing block blk_-1608999600000035902: java.io.IOException
+081110 225125 ERROR dfs.DataNode: Exception writing block blk_-1608999600000035902: java.io.IOException
+081110 142502 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000035902 terminating
+081110 204222 ERROR dfs.DataNode: Exception writing block blk_-1608999600000036159: java.io.IOException
+081110 122353 ERROR dfs.DataNode: Exception writing block blk_-1608999600000036159: java.io.IOException
+081110 141154 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000036159 took 15000ms
+081110 193100 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000036159 terminating
+081110 172012 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000036664 took 15000ms
+081110 190202 ERROR dfs.DataNode: Exception writing block blk_-1608999600000036664: java.io.IOException
+081110 143240 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000036664 took 15000ms
+081110 190514 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000036664 terminating
+081110 180405 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000036956 terminating
+081110 100330 INFO dfs.DataNode: Receiving block blk_-1608999600000036956 src: /10.0.0.52:50010
+081110 152144 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000036956 terminating
+081110 191241 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000036956 terminating
+081110 120025 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000037630
+081110 224215 INFO dfs.DataNode: Receiving block blk_-1608999600000037630 src: /10.0.0.155:50010
+081110 155251 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000037630 terminating
+081110 221321 ERROR dfs.DataNode: Exception writing block blk_-1608999600000038616: java.io.IOException
+081110 122444 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000038616 took 15000ms
+081110 212205 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000038616 took 15000ms
+081110 101321 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000038616 terminating
+081110 200324 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000038967 took 15000ms
+081110 202201 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000038967 on unknown datanode
+081110 211535 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000038967 on unknown datanode
+081110 163542 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000038967 terminating
+081110 204415 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000039757 terminating
+081110 125334 INFO dfs.DataNode: Receiving block blk_-1608999600000039757 src: /10.0.0.229:50010
+081110 175205 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000039757
+081110 205444 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000039757 terminating
+081110 141254 ERROR dfs.DataNode: Exception writing block blk_-1608999600000040506: java.io.IOException
+081110 182242 ERROR dfs.DataNode: Exception writing block blk_-1608999600000040506: java.io.IOException
+081110 164155 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000040506 on unknown datanode
+081110 181015 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000040506 terminating
+081110 213331 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000040926
+081110 221310 INFO dfs.DataNode: Receiving block blk_-1608999600000040926 src: /10.0.0.247:50010
+081110 165343 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000040926 terminating
+081110 213231 INFO dfs.DataNode: Receiving block blk_-1608999600000041022 src: /10.0.0.101:50010
+081110 174252 INFO dfs.DataNode: Receiving block blk_-1608999600000041022 src: /10.0.0.127:50010
+081110 181105 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000041022 terminating
+081110 153451 INFO dfs.DataNode: Receiving block blk_-1608999600000041037 src: /10.0.0.41:50010
+081110 233535 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000041037 terminating
+081110 114211 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000041037
+081110 152351 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000041037 terminating
+081110 232451 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000041544 terminating
+081110 114542 INFO dfs.DataNode: Receiving block blk_-1608999600000041544 src: /10.0.0.231:50010
+081110 170544 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000041544 terminating
+081110 223452 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000041544 terminating
+081110 173212 ERROR dfs.DataNode: Exception writing block blk_-1608999600000042510: java.io.IOException
+081110 165254 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000042510 on unknown datanode
+081110 114304 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000042510 terminating
+081110 144431 ERROR dfs.DataNode: Exception writing block blk_-1608999600000042581: java.io.IOException
+081110 221522 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000042581 took 15000ms
+081110 224243 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000042581 took 15000ms
+081110 220501 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000042581 terminating
+081110 192531 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000043279
+081110 154024 INFO dfs.DataNode: Receiving block blk_-1608999600000043279 src: /10.0.0.157:50010
+081110 110052 INFO dfs.DataNode: Receiving block blk_-1608999600000043279 src: /10.0.0.98:50010
+081110 161431 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000043279 terminating
+081110 113422 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000043287
+081110 105335 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000043287
+081110 233241 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000043287 terminating
+081110 134243 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000043287 terminating
+081110 182511 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000043921
+081110 203454 INFO dfs.DataNode: Receiving block blk_-1608999600000043921 src: /10.0.0.9:50010
+081110 130304 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000043921 terminating
+081110 124153 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000043921 terminating
+081110 154341 INFO dfs.DataNode: Receiving block blk_-1608999600000043953 src: /10.0.0.10:50010
+081110 163413 INFO dfs.DataNode: Receiving block blk_-1608999600000043953 src: /10.0.0.89:50010
+081110 190415 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000043953 terminating
+081110 131443 INFO dfs.DataNode: Receiving block blk_-1608999600000044617 src: /10.0.0.36:50010
+081110 134235 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000044617 terminating
+081110 102351 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000044617
+081110 150313 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000044617 terminating
+081110 195502 INFO dfs.DataNode: Receiving block blk_-1608999600000045457 src: /10.0.0.34:50010
+081110 142540 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000045457 terminating
+081110 155051 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000045457 terminating
+081110 101153 INFO dfs.DataNode: Receiving block blk_-1608999600000046156 src: /10.0.0.49:50010
+081110 114211 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000046156 terminating
+081110 223400 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000046156 terminating
+081110 210330 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000046433 on unknown datanode
+081110 125154 ERROR dfs.DataNode: Exception writing block blk_-1608999600000046433: java.io.IOException
+081110 213143 ERROR dfs.DataNode: Exception writing block blk_-1608999600000046433: java.io.IOException
+081110 132532 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000046433 terminating
+081110 170214 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000046885 took 15000ms
+081110 121145 WARN dfs.DataNode: Slow BlockReceiver write packet for block blk_-1608999600000046885 took 15000ms
+081110 160535 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000046885 terminating
+081110 140325 ERROR dfs.FSNamesystem: BLOCK* NameSystem.addStoredBlock: block blk_-1608999600000047433 on unknown datanode
+081110 133024 ERROR dfs.DataNode: Exception writing block blk_-1608999600000047433: java.io.IOException
+081110 124152 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000047433 terminating
+081110 213055 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000047624
+081110 154404 INFO dfs.DataNode: Receiving block blk_-1608999600000047624 src: /10.0.0.73:50010
+081110 194352 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000047624 terminating
