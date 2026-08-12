@@ -368,20 +368,54 @@ class ThreatFusionEngine:
 
     @staticmethod
     def _reindex_features(
-        feature_dict: dict, feature_list: List[str]
+        feature_dict: Union[dict, Sequence[float], np.ndarray],
+        feature_list: List[str],
     ) -> np.ndarray:
         """
         Build a 1-D float64 array from ``feature_dict`` ordered by
-        ``feature_list``.  Columns absent from ``feature_dict`` are 0.0.
+        ``feature_list``. Columns absent from ``feature_dict`` are 0.0.
 
-        Column ORDER matters for tree-based models (LightGBM, XGBoost) because
-        they store split thresholds by column index, not by name.  Always
-        reindex via the feature list baked into the model export dict.
+        Supports dicts (matching column name, index str/int, or F-prefix),
+        raw sequences/arrays, and sanitizes infinity and NaN values to 0.0.
         """
-        return np.array(
-            [float(feature_dict.get(col, 0.0)) for col in feature_list],
-            dtype=np.float64,
-        )
+        if isinstance(feature_dict, (list, tuple, np.ndarray)):
+            arr = np.array(feature_dict, dtype=np.float64)
+            if len(arr) < len(feature_list):
+                padded = np.zeros(len(feature_list), dtype=np.float64)
+                padded[: len(arr)] = arr
+                arr = padded
+            elif len(arr) > len(feature_list):
+                arr = arr[: len(feature_list)]
+            return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+
+        if not isinstance(feature_dict, dict):
+            return np.zeros(len(feature_list), dtype=np.float64)
+
+        vals = []
+        for idx, col in enumerate(feature_list):
+            val = 0.0
+            if col in feature_dict:
+                val = feature_dict[col]
+            elif str(idx) in feature_dict:
+                val = feature_dict[str(idx)]
+            elif idx in feature_dict:
+                val = feature_dict[idx]
+            elif str(idx + 1) in feature_dict:
+                val = feature_dict[str(idx + 1)]
+            elif (idx + 1) in feature_dict:
+                val = feature_dict[idx + 1]
+            elif f"F{idx+1}" in feature_dict:
+                val = feature_dict[f"F{idx+1}"]
+
+            try:
+                fval = float(val)
+                if np.isnan(fval) or np.isinf(fval):
+                    fval = 0.0
+            except (ValueError, TypeError):
+                fval = 0.0
+            vals.append(fval)
+
+        return np.array(vals, dtype=np.float64)
 
     @staticmethod
     def _sigmoid(x: float) -> float:
@@ -502,9 +536,29 @@ class ThreatFusionEngine:
             ]
             x = self._pad_truncate(encoded, 1000).reshape(1, -1)
             proba = self._win_model.predict_proba(x)[0]
-            # Return a raw score even when labels are invalid; fuse() decides
-            # whether to include it via self._windows_labels_valid.
-            score = float(proba[1]) if len(proba) > 1 else 0.0
+
+            # Locate the "Normal" class index dynamically -- do not hard-code
+            # a positional index that could silently break on re-training.
+            # This mirrors _score_linux which looks up "Normal" the same way.
+            normal_idx: Optional[int] = None
+            if self._win_le is not None:
+                for i, c in enumerate(self._win_le.classes_):
+                    if str(c).lower() == "normal":
+                        normal_idx = i
+                        break
+
+            if normal_idx is not None and normal_idx < len(proba):
+                # Threat score = total probability mass of all non-Normal classes
+                score = 1.0 - float(proba[normal_idx])
+            else:
+                # Fallback: label encoder missing or "Normal" class not found
+                # (e.g. old model still uses S1/S2/S3/S4 labels)
+                logger.debug(
+                    "[windows] 'Normal' class not found in label_encoder -- "
+                    "using 1-max_proba fallback."
+                )
+                score = 1.0 - float(np.max(proba))
+
             return float(np.clip(score, 0.0, 1.0))
         except Exception as exc:  # noqa: BLE001
             logger.warning("[windows] Scoring error: %s", exc)
@@ -569,25 +623,23 @@ class ThreatFusionEngine:
 
     # ------------------------------------------------------------------
 
-    def score_file(self, pe_features: Dict[str, float]) -> Optional[float]:
+    def score_file(
+        self, pe_features: Union[Dict[str, float], Sequence[float], np.ndarray]
+    ) -> Optional[float]:
         """
         Score a PE file against the EMBER model (Model 4).
 
         Parameters
         ----------
-        pe_features : dict
-            Numeric EMBER feature dict (column name -> value).
-            Automatically reindexed to match export["features"]; missing
+        pe_features : dict, list, or ndarray
+            Numeric EMBER feature dict (column name -> value), sequence, or array.
+            Automatically reindexed to match export["features"]; missing or invalid
             columns filled with 0.0.
 
         Returns
         -------
-        P(malicious) = predict_proba[:, 1], clipped to [0, 1].
+        P(malicious) = predict_proba[:, malicious_idx], clipped to [0, 1].
         None if the model is unavailable or an error occurs.
-
-        Input format quirk: same dict-export structure as CICIDS.  Binary
-        classifier: class index 0 = benign, class index 1 = malicious (EMBER
-        dataset training convention).
         """
         if self._ember_model is None:
             logger.warning("[ember] Model not loaded -- skipping.")
@@ -600,8 +652,21 @@ class ThreatFusionEngine:
                 1, -1
             )
             proba = self._ember_model.predict_proba(x)[0]
-            # Index 1 = malicious; guard against single-class edge case
-            score = float(proba[1]) if len(proba) > 1 else float(proba[0])
+
+            # Dynamically resolve malicious class index if classes_ attribute exists
+            malicious_idx = 1
+            if hasattr(self._ember_model, "classes_"):
+                classes = list(self._ember_model.classes_)
+                for i, cls_val in enumerate(classes):
+                    if str(cls_val).lower() in ("1", "malicious", "attack"):
+                        malicious_idx = i
+                        break
+
+            if malicious_idx < len(proba):
+                score = float(proba[malicious_idx])
+            else:
+                score = float(proba[1]) if len(proba) > 1 else float(proba[0])
+
             return float(np.clip(score, 0.0, 1.0))
         except Exception as exc:  # noqa: BLE001
             logger.warning("[ember] Scoring error: %s", exc)

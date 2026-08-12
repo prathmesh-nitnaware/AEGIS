@@ -341,3 +341,5 @@
 081110 213055 INFO dfs.FSNamesystem: BLOCK* NameSystem.allocateBlock: blk_-1608999600000047624
 081110 154404 INFO dfs.DataNode: Receiving block blk_-1608999600000047624 src: /10.0.0.73:50010
 081110 194352 INFO dfs.DataNode: PacketResponder for block blk_-1608999600000047624 terminating
+081110 203518 143 INFO dfs.DataNode$DataXceiver: Receiving block blk_-99999999999999999 src: /10.0.0.1:50010
+081110 203519 143 INFO dfs.DataNode$DataXceiver: PacketResponder for block blk_-99999999999999999 terminating

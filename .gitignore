@@ -1,4 +1,6 @@
 __pycache__/
 *.pyc
-Dataset
-.venvdemo_trust.db
+Dataset/
+.venv/
+*.db
+agent/telemetry_output/

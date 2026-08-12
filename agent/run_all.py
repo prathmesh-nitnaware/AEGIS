@@ -44,7 +44,7 @@ from watchdog.observers import Observer  # noqa: E402
 # EDIT THESE PATHS for your machine before running EMBER / HDFS collectors
 # ---------------------------------------------------------------------------
 PE_WATCH_DIR = r"C:\Users\%USERNAME%\Downloads"   # where new .exe/.dll files show up
-HDFS_LOG_PATH = r"D:\Downloads\AEGIS\agent\test.log"
+HDFS_LOG_PATH = str(Path(__file__).resolve().parent / "test.log")
 
 engine = ThreatFusionEngine()
 print("[run_all] ThreatFusionEngine initialised. Check the [loader] lines above")
