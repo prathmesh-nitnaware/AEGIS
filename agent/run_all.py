@@ -105,7 +105,7 @@ zday.start(poll_interval=2.0)
 # ===========================================================================
 # NOTE: requires Administrator + Npcap installed (https://npcap.com/#download)
 
-net_collector = ScapyFlowCollector(flow_timeout=8.0)
+net_collector = ScapyFlowCollector(flow_timeout=2.0)
 
 try:
     net_collector.start()
@@ -122,11 +122,11 @@ def network_loop():
             if score is not None:
                 verdict = engine.get_verdict(score)
                 dest_port = int(flow['Destination Port'])
-                print(f"[cicids]     port={dest_port} fwd_pkts={int(flow['Total Fwd Packets'])} "
-                      f"bwd_pkts={int(flow['Total Backward Packets'])} -> {score:.3f} ({verdict})")
+                print(f"[cicids]     port={dest_port:<5} fwd_pkts={int(flow['Total Fwd Packets']):<4} "
+                      f"bwd_pkts={int(flow['Total Backward Packets']):<4} -> {score:.6f} ({verdict})")
                 save_event("cicids", score, verdict, destination_port=dest_port,
                            fwd_packets=flow['Total Fwd Packets'], bwd_packets=flow['Total Backward Packets'])
-        time.sleep(5)
+        time.sleep(1.0)
 
 
 threading.Thread(target=network_loop, daemon=True).start()

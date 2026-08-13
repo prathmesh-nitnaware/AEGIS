@@ -181,10 +181,12 @@ class ThreatFusionEngine:
             self._cicids_features: List[str] = list(
                 _cicids_export.get("features", [])
             )
+            self._cicids_key_warning_emitted = False
         else:
             self._cicids_model = None
             self._cicids_le = None
             self._cicids_features = []
+            self._cicids_key_warning_emitted = False
 
         # ----------------------------------------------------------------
         # Model 4 - EMBER File Model (tabular PE features -> P(malicious))
@@ -596,6 +598,19 @@ class ThreatFusionEngine:
             logger.warning("[cicids] Feature list empty -- skipping.")
             return None
         try:
+            if not self._cicids_key_warning_emitted and isinstance(flow_features, dict):
+                matching = set(flow_features.keys()) & set(self._cicids_features)
+                ratio = len(matching) / float(len(self._cicids_features))
+                if ratio < 0.20:
+                    logger.warning(
+                        "[cicids] Incoming flow_features keys share only %.1f%% (%d/%d) "
+                        "matching features with model's expected columns -- scores may default to 0.0 or be uninformative.",
+                        ratio * 100.0,
+                        len(matching),
+                        len(self._cicids_features),
+                    )
+                    self._cicids_key_warning_emitted = True
+
             x = self._reindex_features(flow_features, self._cicids_features).reshape(
                 1, -1
             )

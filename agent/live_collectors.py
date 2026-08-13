@@ -286,13 +286,6 @@ class NetworkFlowCollector:
             flows.append({
                 "Destination Port": float(c.raddr.port),
                 "Flow Duration": float(duration_ms),
-                # Real per-packet/byte counters need packet capture (scapy)
-                # for accuracy -- left at 0.0 here; score_network_flow()
-                # fills any column you omit with 0.0 automatically.
-                "Total Fwd Packets": 0.0,
-                "Total Backward Packets": 0.0,
-                "Total Length of Fwd Packets": 0.0,
-                "Total Length of Bwd Packets": 0.0,
             })
         return flows
 
