@@ -272,6 +272,7 @@ class ThreatFusionEngine:
         if weights:
             _default_weights.update(weights)
         self._weights = _default_weights
+        self._warned_missing: set = set()
 
         # ----------------------------------------------------------------
         # Label-validity flags
@@ -592,10 +593,14 @@ class ThreatFusionEngine:
         Fallback: if BENIGN is not found in classes_, use 1 - max_probability.
         """
         if self._cicids_model is None:
-            logger.warning("[cicids] Model not loaded -- skipping.")
+            if "cicids" not in self._warned_missing:
+                logger.warning("[cicids] Model not loaded -- skipping.")
+                self._warned_missing.add("cicids")
             return None
         if not self._cicids_features:
-            logger.warning("[cicids] Feature list empty -- skipping.")
+            if "cicids_features" not in self._warned_missing:
+                logger.warning("[cicids] Feature list empty -- skipping.")
+                self._warned_missing.add("cicids_features")
             return None
         try:
             if not self._cicids_key_warning_emitted and isinstance(flow_features, dict):
@@ -791,7 +796,9 @@ class ThreatFusionEngine:
         unseen label (see _safe_le_transform).
         """
         if self._zday_model is None:
-            logger.warning("[zero_day] Model not loaded -- skipping.")
+            if "zero_day" not in self._warned_missing:
+                logger.warning("[zero_day] Model not loaded -- skipping.")
+                self._warned_missing.add("zero_day")
             return None
         try:
             # --- Encode categoricals; unseen values -> index 0 ---
@@ -821,6 +828,18 @@ class ThreatFusionEngine:
             # score = 1 - sigmoid(decision) maps the inverted value to (0, 1)
             decision: float = float(self._zday_model.decision_function(x)[0])
             score = 1.0 - self._sigmoid(decision)
+
+            # Allowlist / threshold calibration for known benign local processes
+            benign_processes = {
+                "svchost.exe", "explorer.exe", "conhost.exe", "taskhostw.exe",
+                "dwm.exe", "csrss.exe", "services.exe", "lsass.exe", "smss.exe",
+                "searchhost.exe", "startmenuexperiencehost.exe", "textinputhost.exe",
+                "ctfmon.exe", "chrome.exe", "cursor.exe", "code.exe", "py.exe",
+                "python.exe", "cmd.exe", "powershell.exe", "antigravity-ide.exe"
+            }
+            if str(process_name).lower() in benign_processes and ip in ("0.0.0.0", "127.0.0.1"):
+                score = min(score, 0.15)
+
             return float(np.clip(score, 0.0, 1.0))
         except Exception as exc:  # noqa: BLE001
             logger.warning("[zero_day] Scoring error: %s", exc)

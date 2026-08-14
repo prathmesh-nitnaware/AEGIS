@@ -225,6 +225,11 @@ class WindowsAPICollector:
         with self._lock:
             return list(self._buffers.get(pid, []))
 
+    def get_active_pids(self) -> List[int]:
+        """Return a list of PIDs currently present in the buffer."""
+        with self._lock:
+            return list(self._buffers.keys())
+
     def stop(self):
         self._stop.set()
 
@@ -525,9 +530,9 @@ class ZeroDayEventCollector:
     Windows Event IDs or synthetic labels, then match that exactly.
     """
 
-    def __init__(self, on_event: Callable[[str, str, str, str], None]):
+    def __init__(self, on_event: Callable[[str, str, str, str], None], seed_initial: bool = True):
         self._callback = on_event
-        self._seen_pids: set = set()
+        self._seen_pids: set = set(psutil.pids()) if seed_initial else set()
         self._stop = threading.Event()
 
     def start(self, poll_interval: float = 2.0):

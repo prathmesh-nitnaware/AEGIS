@@ -108,10 +108,26 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 _write_lock = threading.Lock()
 
 
+def _post_event_async(event_payload: dict):
+    def _send():
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                "http://127.0.0.1:8000/api/telemetry",
+                data=json.dumps(event_payload, default=str).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            urllib.request.urlopen(req, timeout=1.0)
+        except Exception:
+            pass
+    threading.Thread(target=_send, daemon=True).start()
+
+
 def save_event(model: str, score: float, verdict: str, **extra):
-    """Append one scored event as a JSON line to telemetry_scores.jsonl."""
+    """Append one scored event as a JSON line to telemetry_scores.jsonl and POST to backend API."""
+    ts = datetime.now(timezone.utc).isoformat()
     event = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": ts,
         "model": model,
         "score": round(score, 4),
         "verdict": verdict,
@@ -121,6 +137,24 @@ def save_event(model: str, score: float, verdict: str, **extra):
     with _write_lock:
         with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
             f.write(line + "\n")
+
+    # Bridge to backend WebSocket API
+    api_payload = {
+        "timestamp": ts,
+        "model": model,
+        "threat_score": float(score),
+        "predicted_class": verdict,
+        "pid": extra.get("pid", 0),
+        "uid": extra.get("uid", 0),
+        "process": extra.get("process_name", extra.get("process", extra.get("file_path", model))),
+        "normal_probability": round(1.0 - float(score), 4),
+        "probabilities": {
+            "Normal": round(1.0 - float(score), 4),
+            "Threat": round(float(score), 4),
+        },
+        **extra,
+    }
+    _post_event_async(api_payload)
 
 
 print(f"[run_all] Scored events will also be saved to: {OUTPUT_FILE}\n")
@@ -251,9 +285,23 @@ def start_windows_advanced() -> None:
     win_collector = WindowsAPICollector()
     win_collector.start()  # raises RuntimeError internally if not on Windows
     print("[run_all] Windows Advanced collector started (reading Sysmon log).")
-    print("[run_all] NOTE: scoring for this model requires wiring get_sequence(pid)")
-    print("[run_all]       into score_process_event(api_call_sequence=...) per PID --")
-    print("[run_all]       not auto-looped here since it needs a specific PID to watch.")
+
+    def score_loop():
+        while True:
+            try:
+                for pid in win_collector.get_active_pids():
+                    seq = win_collector.get_sequence(pid)
+                    if len(seq) >= 5:
+                        score = engine.score_process_event(api_call_sequence=seq)
+                        if score is not None:
+                            verdict = engine.get_verdict(score)
+                            print(f"[windows_adv] pid={pid} seq_len={len(seq)} -> {score:.3f} ({verdict})")
+                            save_event("windows_advanced", score, verdict, pid=pid, sequence_len=len(seq))
+            except Exception:
+                pass
+            time.sleep(2.0)
+
+    threading.Thread(target=score_loop, daemon=True).start()
     _running_handles["windows_advanced"] = win_collector
 
 

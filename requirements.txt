@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+scapy
+watchdog
+lief
+pywin32; sys_platform == 'win32'
+lightgbm
+scikit-learn
+xgboost
+numpy
+pandas
+joblib
+psutil
+requests

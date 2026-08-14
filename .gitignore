@@ -4,3 +4,7 @@ Dataset/
 .venv/
 *.db
 agent/telemetry_output/
+node_modules/
+dashboard/node_modules/
+dashboard/dist/
+

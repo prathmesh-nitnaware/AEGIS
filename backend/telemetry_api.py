@@ -9,15 +9,30 @@ from fastapi.middleware.cors import CORSMiddleware
 # AEGIS TELEMETRY API
 # ============================================================
 
+from contextlib import asynccontextmanager
+
+import platform
+
+from backend.services.telemetry_service import add_event, add_model_result
+from backend.api.telemetry import router as telemetry_router
+
+SERVER_START_TIME = time.time()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global api_loop
+    api_loop = asyncio.get_running_loop()
+    print("[AEGIS API] Telemetry API started")
+    print("[AEGIS API] WebSocket: /ws/telemetry")
+    yield
+
+
 app = FastAPI(
     title="AEGIS Telemetry API",
     version="1.0.0",
+    lifespan=lifespan,
 )
-
-
-# ============================================================
-# CORS
-# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,15 +42,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(telemetry_router)
+
 
 # ============================================================
 # GLOBAL STATE
 # ============================================================
 
 clients: set[WebSocket] = set()
-
 api_loop: asyncio.AbstractEventLoop | None = None
-
 
 latest_event = {
     "timestamp": 0,
@@ -52,21 +67,6 @@ latest_event = {
 
 
 # ============================================================
-# STARTUP
-# ============================================================
-
-@app.on_event("startup")
-async def startup_event():
-
-    global api_loop
-
-    api_loop = asyncio.get_running_loop()
-
-    print("[AEGIS API] Telemetry API started")
-    print("[AEGIS API] WebSocket: /ws/telemetry")
-
-
-# ============================================================
 # ROOT
 # ============================================================
 
@@ -76,6 +76,7 @@ async def root():
     return {
         "service": "AEGIS Telemetry API",
         "status": "online",
+        "platform": platform.system(),
         "websocket": "/ws/telemetry",
     }
 
@@ -87,9 +88,13 @@ async def root():
 @app.get("/api/health")
 async def health():
 
+    uptime = time.time() - SERVER_START_TIME
     return {
         "status": "healthy",
+        "platform": platform.system(),
         "connected_clients": len(clients),
+        "uptime": round(uptime, 1),
+        "server_start_time": SERVER_START_TIME,
         "timestamp": time.time(),
     }
 
@@ -245,9 +250,12 @@ def publish_event(event: dict):
 @app.post("/api/telemetry")
 async def post_telemetry(event: dict):
     """
-    Endpoint for live telemetry collectors (e.g. linux_collector.py)
+    Endpoint for live telemetry collectors (e.g. run_all.py, linux_collector.py)
     to submit predictions to be broadcasted to all connected dashboards.
     """
+    add_event(event)
+    if "threat_score" in event or "score" in event:
+        add_model_result(event)
     await broadcast(event)
     return {
         "status": "published",

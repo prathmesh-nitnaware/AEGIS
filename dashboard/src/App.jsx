@@ -151,13 +151,25 @@ export default function App() {
   const [alerts, setAlerts] = useState([]);
   const [selectedProcess, setSelectedProcess] = useState(null);
   const [totalTelemetryCount, setTotalTelemetryCount] = useState(0);
-  const [uptime, setUptime] = useState(0);
+  const [serverUptime, setServerUptime] = useState(0);
+  const [hostOS, setHostOS] = useState("Windows");
   const [clock, setClock] = useState(new Date());
 
-  /* Uptime and clock tickers */
+  /* Uptime and health check ticker */
   useEffect(() => {
     const id1 = setInterval(() => setClock(new Date()), 1000);
-    const id2 = setInterval(() => setUptime((u) => u + 1), 1000);
+    const fetchHealth = async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:8000/api/health");
+        const data = await res.json();
+        if (data.uptime !== undefined) setServerUptime(Math.floor(data.uptime));
+        if (data.platform) setHostOS(data.platform);
+      } catch (e) {
+        // Backend offline
+      }
+    };
+    fetchHealth();
+    const id2 = setInterval(fetchHealth, 3000);
     return () => {
       clearInterval(id1);
       clearInterval(id2);
@@ -189,10 +201,14 @@ export default function App() {
       ws.onmessage = (message) => {
         try {
           const event = JSON.parse(message.data);
-          if (event.type === "heartbeat" || typeof event.threat_score !== "number") return;
+          if (event.type === "heartbeat") return;
+
+          const threatScore = typeof event.threat_score === "number" 
+            ? event.threat_score 
+            : (typeof event.score === "number" ? event.score : 0);
 
           setLatestEvent(event);
-          setCurrentThreat(event.threat_score);
+          setCurrentThreat(threatScore);
           setTotalTelemetryCount((prev) => prev + 1);
 
           const timeStr = formatTimestamp(event.timestamp);
@@ -203,44 +219,48 @@ export default function App() {
               ...prev,
               {
                 time: timeStr,
-                score: Number(event.threat_score.toFixed(3)),
+                score: Number(threatScore.toFixed(3)),
               },
             ].slice(-20)
           );
 
-          // Update active processes table
+          const procName = event.process || event.process_name || (event.file_path ? event.file_path.split(/[\/\\]/).pop() : null) || event.model || "unknown";
+          const modelTag = (event.model || "event").toUpperCase();
+
+          // Update active processes/events table
           setProcesses((prev) => {
             const updated = [
               {
-                process: event.process || "unknown",
-                pid: event.pid,
-                uid: event.uid,
-                syscall: event.syscall,
+                process: procName,
+                model: modelTag,
+                pid: event.pid || 0,
+                uid: event.uid || 0,
+                syscall: event.syscall || (event.destination_port ? `Port ${event.destination_port}` : "N/A"),
                 window_size: event.window_size || 500,
-                threat_score: event.threat_score,
-                predicted_class: event.predicted_class || "Normal",
-                normal_probability: event.normal_probability || 0,
+                threat_score: threatScore,
+                predicted_class: event.predicted_class || event.verdict || "Normal",
+                normal_probability: event.normal_probability || (1 - threatScore),
                 probabilities: event.probabilities || {},
                 timestamp: event.timestamp,
               },
-              ...prev.filter((p) => p.pid !== event.pid),
+              ...prev.filter((p) => p.pid !== (event.pid || 0) || p.process !== procName),
             ];
             return updated.slice(0, 10);
           });
 
           // Generate alert if threat threshold is met
-          if (event.threat_score >= 0.35) {
+          if (threatScore >= 0.35) {
             setAlerts((prev) => [
               {
-                id: `${event.timestamp}-${event.pid}`,
-                severity: event.threat_score >= 0.6 ? "critical" : "warning",
-                process: event.process,
-                pid: event.pid,
-                message: `Anomaly detected on ${event.process} (PID ${event.pid}) — ${
-                  event.predicted_class
-                } (${(event.threat_score * 100).toFixed(1)}% threat score)`,
+                id: `${event.timestamp}-${event.pid || Math.random()}`,
+                severity: threatScore >= 0.6 ? "critical" : "warning",
+                process: procName,
+                pid: event.pid || 0,
+                message: `[${modelTag}] Anomaly on ${procName} — ${
+                  event.predicted_class || event.verdict || "MEDIUM"
+                } (${(threatScore * 100).toFixed(1)}% threat score)`,
                 time: timeStr,
-                tag: event.predicted_class,
+                tag: event.predicted_class || event.verdict || "Alert",
               },
               ...prev,
             ].slice(0, 10));
@@ -271,13 +291,14 @@ export default function App() {
     fetch("http://127.0.0.1:8000/api/telemetry/latest")
       .then((res) => res.json())
       .then((event) => {
-        if (event && typeof event.threat_score === "number" && event.timestamp) {
+        if (event && (typeof event.threat_score === "number" || typeof event.score === "number") && event.timestamp) {
+          const threatScore = typeof event.threat_score === "number" ? event.threat_score : event.score;
           setLatestEvent(event);
-          setCurrentThreat(event.threat_score);
+          setCurrentThreat(threatScore);
           setThreatData([
             {
               time: formatTimestamp(event.timestamp),
-              score: Number(event.threat_score.toFixed(3)),
+              score: Number(threatScore.toFixed(3)),
             },
           ]);
         }
@@ -286,9 +307,9 @@ export default function App() {
   }, []);
 
   /* Formatting calculations */
-  const hrs = Math.floor(uptime / 3600);
-  const mins = Math.floor((uptime % 3600) / 60);
-  const secs = uptime % 60;
+  const hrs = Math.floor(serverUptime / 3600);
+  const mins = Math.floor((serverUptime % 3600) / 60);
+  const secs = serverUptime % 60;
   const uptimeStr = `${hrs}h ${mins}m ${secs}s`;
 
   const clockStr = clock.toLocaleTimeString("en-GB", { hour12: false });
@@ -378,7 +399,7 @@ export default function App() {
           <div>
             <h2>AEGIS Command Node</h2>
             <p className="topbar-subtitle">
-              Live Linux System Telemetry & Model Verdict Engine
+              Live {hostOS} Telemetry & Multi-Model Threat Engine
             </p>
           </div>
 
@@ -567,7 +588,7 @@ export default function App() {
                 <div className="empty-model-state">
                   <Shield size={32} className="muted-icon" />
                   <p>No model inference received yet.</p>
-                  <span>Run <code>sudo ./.venv/bin/python agent/linux_collector.py</code></span>
+                  <span>Run <code>python agent/run_all.py</code></span>
                 </div>
               )}
             </div>
@@ -706,32 +727,65 @@ export default function App() {
               </div>
 
               <div className="health-list">
-                <div className="health-item">
-                  <Wifi size={16} className="health-icon" />
-                  <div className="health-info">
-                    <div className="health-name">Kernel bpftrace Probe</div>
-                    <div className="health-detail">Syscall tracepoint raw_syscalls</div>
-                  </div>
-                  <div className="health-dot active" />
-                </div>
+                {hostOS.toLowerCase().includes("win") ? (
+                  <>
+                    <div className="health-item">
+                      <Wifi size={16} className="health-icon" />
+                      <div className="health-info">
+                        <div className="health-name">Zero-Day & Sysmon Monitor</div>
+                        <div className="health-detail">Process creation & Event Log collector</div>
+                      </div>
+                      <div className={`health-dot ${wsStatus === "LIVE" ? "active" : "waiting"}`} />
+                    </div>
 
-                <div className="health-item">
-                  <Activity size={16} className="health-icon" />
-                  <div className="health-info">
-                    <div className="health-name">FastAPI WebSocket Server</div>
-                    <div className="health-detail">Endpoint ws://127.0.0.1:8000/ws/telemetry</div>
-                  </div>
-                  <div className={`health-dot ${wsStatus.toLowerCase()}`} />
-                </div>
+                    <div className="health-item">
+                      <Activity size={16} className="health-icon" />
+                      <div className="health-info">
+                        <div className="health-name">FastAPI Telemetry Hub</div>
+                        <div className="health-detail">Endpoint ws://127.0.0.1:8000/ws/telemetry</div>
+                      </div>
+                      <div className={`health-dot ${wsStatus.toLowerCase()}`} />
+                    </div>
 
-                <div className="health-item">
-                  <Cpu size={16} className="health-icon" />
-                  <div className="health-info">
-                    <div className="health-name">XGBoost ML Inference Adapter</div>
-                    <div className="health-detail">Linux 7-class anomaly model</div>
-                  </div>
-                  <div className="health-dot active" />
-                </div>
+                    <div className="health-item">
+                      <Cpu size={16} className="health-icon" />
+                      <div className="health-info">
+                        <div className="health-name">Threat Fusion Engine</div>
+                        <div className="health-detail">Multi-Model (CICIDS, EMBER, Zero-Day)</div>
+                      </div>
+                      <div className={`health-dot ${wsStatus === "LIVE" ? "active" : "waiting"}`} />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="health-item">
+                      <Wifi size={16} className="health-icon" />
+                      <div className="health-info">
+                        <div className="health-name">Kernel bpftrace Probe</div>
+                        <div className="health-detail">Syscall tracepoint raw_syscalls</div>
+                      </div>
+                      <div className={`health-dot ${wsStatus === "LIVE" ? "active" : "waiting"}`} />
+                    </div>
+
+                    <div className="health-item">
+                      <Activity size={16} className="health-icon" />
+                      <div className="health-info">
+                        <div className="health-name">FastAPI Telemetry Hub</div>
+                        <div className="health-detail">Endpoint ws://127.0.0.1:8000/ws/telemetry</div>
+                      </div>
+                      <div className={`health-dot ${wsStatus.toLowerCase()}`} />
+                    </div>
+
+                    <div className="health-item">
+                      <Cpu size={16} className="health-icon" />
+                      <div className="health-info">
+                        <div className="health-name">XGBoost ML Inference Adapter</div>
+                        <div className="health-detail">Linux 7-class anomaly model</div>
+                      </div>
+                      <div className={`health-dot ${wsStatus === "LIVE" ? "active" : "waiting"}`} />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </section>
