@@ -3,7 +3,13 @@ import subprocess
 import sys
 from collections import defaultdict, deque
 
+# Ensure project root is in sys.path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from agent.linux_model_adapter import LinuxModelAdapter
+
 
 
 WINDOW_SIZE = 500
@@ -143,6 +149,35 @@ class LinuxTelemetryCollector:
 
             print("========================================")
             print()
+
+            # Dispatch live telemetry event to backend API
+            event = {
+                "timestamp": timestamp,
+                "pid": pid,
+                "uid": uid,
+                "process": process,
+                "syscall": sequence[-1] if sequence else 0,
+                "window_size": len(sequence),
+                "predicted_class": result["predicted_class"],
+                "normal_probability": float(result["p_normal"]),
+                "threat_score": float(result["threat_score"]),
+                "probabilities": {
+                    k: float(v) for k, v in result["probabilities"].items()
+                },
+            }
+            try:
+                import json
+                import urllib.request
+
+                req = urllib.request.Request(
+                    "http://127.0.0.1:8000/api/telemetry",
+                    data=json.dumps(event).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                )
+                urllib.request.urlopen(req, timeout=1)
+            except Exception:
+                pass
+
 
         except Exception as e:
 

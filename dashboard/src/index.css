@@ -1,0 +1,226 @@
+/* ─── AEGIS Design System ─── */
+
+:root {
+  /* Palette */
+  --bg-base: #070b12;
+  --bg-surface: #0b1019;
+  --bg-elevated: #0e1622;
+  --bg-hover: #111827;
+  --bg-glass: rgba(11, 16, 25, 0.75);
+
+  --border-default: #1c2533;
+  --border-subtle: #151e2a;
+  --border-accent: #26364e;
+
+  --text-primary: #e5e7eb;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-dim: #475569;
+
+  --accent-blue: #60a5fa;
+  --accent-blue-bright: #3b82f6;
+  --accent-blue-glow: rgba(96, 165, 250, 0.15);
+  --accent-blue-deep: #1e40af;
+
+  --status-safe: #4ade80;
+  --status-safe-bg: #0d2117;
+  --status-safe-border: #163a28;
+  --status-safe-glow: rgba(74, 222, 128, 0.2);
+
+  --status-warning: #fbbf24;
+  --status-warning-bg: #211a0b;
+  --status-warning-border: #3d3215;
+  --status-warning-glow: rgba(251, 191, 36, 0.2);
+
+  --status-danger: #ef4444;
+  --status-danger-bg: #1f0a0a;
+  --status-danger-border: #3b1515;
+  --status-danger-glow: rgba(239, 68, 68, 0.2);
+
+  --status-critical: #f97316;
+
+  /* Gradients */
+  --gradient-blue: linear-gradient(135deg, #1e3a5f 0%, #0e1622 100%);
+  --gradient-glow: linear-gradient(135deg, rgba(96, 165, 250, 0.08) 0%, rgba(59, 130, 246, 0.02) 100%);
+  --gradient-border: linear-gradient(135deg, #26364e, #1c2533 50%, #26364e);
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --shadow-glow-blue: 0 0 20px rgba(96, 165, 250, 0.1);
+  --shadow-glow-green: 0 0 12px rgba(74, 222, 128, 0.15);
+
+  /* Transitions */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-fast: 150ms var(--ease-out);
+  --transition-normal: 250ms var(--ease-out);
+  --transition-slow: 400ms var(--ease-out);
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+
+/* ─── Resets ─── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-base);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+ul, ol {
+  list-style: none;
+}
+
+img, svg {
+  display: block;
+  max-width: 100%;
+}
+
+
+/* ─── Keyframes ─── */
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(74, 222, 128, 0.4); }
+  50% { box-shadow: 0 0 16px rgba(74, 222, 128, 0.7); }
+}
+
+@keyframes glow-pulse-blue {
+  0%, 100% { box-shadow: 0 0 8px rgba(96, 165, 250, 0.3); }
+  50% { box-shadow: 0 0 18px rgba(96, 165, 250, 0.6); }
+}
+
+@keyframes glow-pulse-red {
+  0%, 100% { box-shadow: 0 0 8px rgba(239, 68, 68, 0.3); }
+  50% { box-shadow: 0 0 18px rgba(239, 68, 68, 0.6); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes bar-fill {
+  from { width: 0; }
+}
+
+@keyframes count-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes border-glow {
+  0%, 100% { border-color: var(--border-default); }
+  50% { border-color: var(--border-accent); }
+}
+
+@keyframes scan-line {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+
+/* ─── Scrollbar ─── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-base);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-accent);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+
+/* ─── Selection ─── */
+
+::selection {
+  background: rgba(96, 165, 250, 0.25);
+  color: #fff;
+}
