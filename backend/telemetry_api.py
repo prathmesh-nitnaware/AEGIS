@@ -15,17 +15,37 @@ import platform
 
 from backend.services.telemetry_service import add_event, add_model_result
 from backend.api.telemetry import router as telemetry_router
+from agent.heartbeat import SilenceDetector
 
 SERVER_START_TIME = time.time()
+
+# ============================================================
+# HEARTBEAT / SILENT-ALARM SUBSYSTEM
+# ============================================================
+# on_silent_alarm fires from SilenceDetector's own background thread, NOT
+# the asyncio event loop - so it goes through publish_event() (the existing
+# thread-safe bridge below) rather than calling broadcast() directly.
+def _on_silent_alarm(alarm_payload: dict):
+    publish_event({**alarm_payload, "type": "agent_alarm"})
+
+
+silence_detector = SilenceDetector(
+    silence_threshold=15.0,   # AEGIS spec default - no heartbeat for 15s -> alarm
+    check_interval=2.0,
+    on_silent_alarm=_on_silent_alarm,
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global api_loop
     api_loop = asyncio.get_running_loop()
+    silence_detector.start()
     print("[AEGIS API] Telemetry API started")
     print("[AEGIS API] WebSocket: /ws/telemetry")
+    print("[AEGIS API] Heartbeat ingestion: POST /api/heartbeat")
     yield
+    silence_detector.stop()
 
 
 app = FastAPI(
@@ -304,6 +324,33 @@ async def test_telemetry():
     }
 
 
+# ============================================================
+# HEARTBEAT INGESTION
+# ============================================================
+# Called by each agent machine every 5s (see agent/heartbeat_runner.py).
+# Runs inside the async endpoint, but record_heartbeat() is protected by its
+# own internal lock so this is safe to call directly.
+@app.post("/api/heartbeat")
+async def post_heartbeat(payload: dict):
+    silence_detector.record_heartbeat(payload)
+
+    # Use a distinct event type from the reserved "heartbeat" keepalive
+    # ping (see telemetry_socket below) so the frontend doesn't drop it.
+    await broadcast({**payload, "type": "agent_heartbeat"})
+
+    return {"status": "ok", "agent_id": payload.get("agent_id")}
+
+
+@app.get("/api/agents")
+async def get_agents():
+    """
+    Full snapshot of every tracked agent's heartbeat state. The dashboard
+    calls this once on load so it doesn't have to wait for a live event to
+    know who's already registered.
+    """
+    return {"agents": silence_detector.list_agents()}
+
+
 if __name__ == "__main__":
     import os
     import sys
@@ -314,4 +361,6 @@ if __name__ == "__main__":
         sys.path.insert(0, project_root)
     os.environ["PYTHONPATH"] = project_root + (os.pathsep + os.environ["PYTHONPATH"] if "PYTHONPATH" in os.environ else "")
 
-    uvicorn.run("backend.telemetry_api:app", host="127.0.0.1", port=8000, reload=True)
+    # 0.0.0.0, not 127.0.0.1 - agent machines on the LAN need to reach this,
+    # not just processes on this same machine.
+    uvicorn.run("backend.telemetry_api:app", host="0.0.0.0", port=8000, reload=True)

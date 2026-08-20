@@ -447,6 +447,27 @@ class SilenceDetector:
                 "alarm_raised": agent.alarm_raised,
             }
 
+    def list_agents(self) -> List[Dict[str, Any]]:
+        """
+        Retrieve current tracking state for every registered agent.
+
+        Used to populate a dashboard's full agent-health view on initial
+        load, rather than requiring one get_agent_status() call per agent.
+        """
+        now = time.time()
+        with self._lock:
+            return [
+                {
+                    "agent_id": agent.agent_id,
+                    "last_seen": agent.last_seen,
+                    "silence_duration": round(now - agent.last_seen, 2),
+                    "status": agent.status,
+                    "cpu": agent.cpu,
+                    "alarm_raised": agent.alarm_raised,
+                }
+                for agent in self._agents.values()
+            ]
+
 
 # ===========================================================================
 # Runnable Demo
