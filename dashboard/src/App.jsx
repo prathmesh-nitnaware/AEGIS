@@ -154,6 +154,7 @@ export default function App() {
   const [serverUptime, setServerUptime] = useState(0);
   const [hostOS, setHostOS] = useState("Windows");
   const [clock, setClock] = useState(new Date());
+  const [agents, setAgents] = useState({}); // agent_id -> { agentId, status, cpu, alarmed, lastSeen }
 
   /* Uptime and health check ticker */
   useEffect(() => {
@@ -201,6 +202,52 @@ export default function App() {
       ws.onmessage = (message) => {
         try {
           const event = JSON.parse(message.data);
+
+          // Per-agent heartbeat/silent-alarm events - handled separately
+          // from the general telemetry stream below, and BEFORE the
+          // reserved "heartbeat" keepalive check (different type string,
+          // but keep them visually grouped since they're related).
+          if (event.type === "agent_heartbeat") {
+            setAgents((prev) => ({
+              ...prev,
+              [event.agent_id]: {
+                agentId: event.agent_id,
+                status: event.status || "healthy",
+                cpu: event.cpu,
+                alarmed: false,
+                lastSeen: event.timestamp,
+              },
+            }));
+            return;
+          }
+
+          if (event.type === "agent_alarm") {
+            setAgents((prev) => ({
+              ...prev,
+              [event.agent_id]: {
+                ...(prev[event.agent_id] || { agentId: event.agent_id, cpu: 0 }),
+                agentId: event.agent_id,
+                status: "silent",
+                alarmed: true,
+              },
+            }));
+            setAlerts((prev) =>
+              [
+                {
+                  id: `alarm-${event.agent_id}-${event.timestamp}`,
+                  severity: "critical",
+                  process: event.agent_id,
+                  pid: 0,
+                  message: event.message || `${event.agent_id} is SILENT`,
+                  time: new Date(event.timestamp * 1000).toLocaleTimeString("en-GB", { hour12: false }),
+                  tag: "SILENT_ALARM",
+                },
+                ...prev,
+              ].slice(0, 10)
+            );
+            return;
+          }
+
           if (event.type === "heartbeat") return;
 
           const threatScore = typeof event.threat_score === "number" 
@@ -302,6 +349,26 @@ export default function App() {
             },
           ]);
         }
+      })
+      .catch(() => {});
+  }, []);
+
+  /* Fetch initial agent heartbeat snapshot */
+  useEffect(() => {
+    fetch("http://127.0.0.1:8000/api/agents")
+      .then((res) => res.json())
+      .then((data) => {
+        const map = {};
+        (data.agents || []).forEach((a) => {
+          map[a.agent_id] = {
+            agentId: a.agent_id,
+            status: a.alarm_raised ? "silent" : a.status,
+            cpu: a.cpu,
+            alarmed: a.alarm_raised,
+            lastSeen: a.last_seen,
+          };
+        });
+        setAgents(map);
       })
       .catch(() => {});
   }, []);
@@ -790,6 +857,53 @@ export default function App() {
             </div>
           </section>
         )}
+
+        {/* AGENT HEALTH MONITOR - LAN heartbeat / silent-alarm status per machine */}
+        {activeTab === "overview" && (
+          <section className="panel agent-health-panel" style={{ marginTop: 20 }}>
+            <div className="panel-header">
+              <div>
+                <h3 className="panel-title">
+                  <Server size={15} style={{ display: "inline", verticalAlign: "-2px", marginRight: 6 }} />
+                  Agent Health Monitor
+                </h3>
+                <p className="panel-subtitle">LAN heartbeat status per machine</p>
+              </div>
+              <div className="panel-badge">{Object.keys(agents).length} AGENTS</div>
+            </div>
+
+            <div className="health-list">
+              {Object.keys(agents).length > 0 ? (
+                Object.values(agents)
+                  .sort((a, b) => a.agentId.localeCompare(b.agentId))
+                  .map((a) => (
+                    <div className="health-item" key={a.agentId}>
+                      <Server size={16} className="health-icon" />
+                      <div className="health-info">
+                        <div className="health-name">{a.agentId}</div>
+                        <div className="health-detail">
+                          {a.alarmed
+                            ? "SILENT — no heartbeat received"
+                            : `${a.status} · CPU ${typeof a.cpu === "number" ? a.cpu.toFixed(1) : a.cpu}%`}
+                        </div>
+                      </div>
+                      <div
+                        className={`health-dot ${
+                          a.alarmed ? "disconnected" : a.status === "degraded" ? "connecting" : "active"
+                        }`}
+                      />
+                    </div>
+                  ))
+              ) : (
+                <div className="empty-table-placeholder">
+                  <Server size={28} className="muted-icon" />
+                  <p>No agents registered yet. Waiting for first heartbeat...</p>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
 
         {/* ═══ INSPECT MODAL ═══ */}
         {selectedProcess && (

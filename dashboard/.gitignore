@@ -1,24 +1,46 @@
-# Logs
-logs
-*.log
+# ── Python ──────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# ── Node / React (dashboard) ───────────────────────────
+node_modules/
+dist/
+.vite/
 npm-debug.log*
-yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+package-lock.json.bak
 
-node_modules
-dist
-dist-ssr
-*.local
+# ── Logs ────────────────────────────────────────────
+*.log
+test.log
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# ── Databases (local runtime state, not source) ────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Environment / secrets ───────────────────────────────
+.env
+.env.local
+
+# ── OS / editor clutter ─────────────────────────────────
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# ── Build artifacts ──────────────────────────────────────
+*.egg-info/
+build/
