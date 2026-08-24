@@ -181,12 +181,13 @@ class WindowsAPICollector:
 
     MAX_BUFFER = 1000
 
-    def __init__(self):
+    def __init__(self, on_sysmon_event: Optional[Callable[[Dict], None]] = None):
         self._buffers: Dict[int, Deque[str]] = defaultdict(
             lambda: deque(maxlen=self.MAX_BUFFER)
         )
         self._lock = threading.Lock()
         self._stop = threading.Event()
+        self.on_sysmon_event = on_sysmon_event
 
     def start(self):
         if not IS_WINDOWS:
@@ -205,16 +206,76 @@ class WindowsAPICollector:
                 hand = win32evtlog.OpenEventLog(server, log_type)
                 events = win32evtlog.ReadEventLog(hand, flags, 0)
                 for ev in events:
+                    # Event ID 1: Process Create
+                    if ev.EventID == 1 and ev.StringInserts and len(ev.StringInserts) > 11:
+                        pid = int(ev.StringInserts[2])
+                        event_data = {
+                            "event_id": 1,
+                            "utc_time": ev.StringInserts[0],
+                            "process_guid": ev.StringInserts[1],
+                            "pid": pid,
+                            "image": ev.StringInserts[3],
+                            "command_line": ev.StringInserts[4],
+                            "user": ev.StringInserts[5],
+                            "integrity_level": ev.StringInserts[7],
+                            "hashes": ev.StringInserts[8],
+                            "parent_process_guid": ev.StringInserts[9],
+                            "parent_pid": int(ev.StringInserts[10]) if ev.StringInserts[10].isdigit() else 0,
+                            "parent_image": ev.StringInserts[11],
+                            "parent_command_line": ev.StringInserts[12] if len(ev.StringInserts) > 12 else "",
+                        }
+                        if self.on_sysmon_event:
+                            self.on_sysmon_event(event_data)
+
+                    # Event ID 3: Network Connection
+                    elif ev.EventID == 3 and ev.StringInserts and len(ev.StringInserts) > 15:
+                        event_data = {
+                            "event_id": 3,
+                            "utc_time": ev.StringInserts[0],
+                            "process_guid": ev.StringInserts[1],
+                            "pid": int(ev.StringInserts[2]) if ev.StringInserts[2].isdigit() else 0,
+                            "image": ev.StringInserts[3],
+                            "protocol": ev.StringInserts[5],
+                            "source_ip": ev.StringInserts[8],
+                            "source_port": int(ev.StringInserts[10]) if ev.StringInserts[10].isdigit() else 0,
+                            "destination_ip": ev.StringInserts[13],
+                            "destination_port": int(ev.StringInserts[15]) if ev.StringInserts[15].isdigit() else 0,
+                        }
+                        if self.on_sysmon_event:
+                            self.on_sysmon_event(event_data)
+
                     # EventID 7 = Image loaded (DLL load) -- StringInserts
                     # typically contains [UtcTime, ProcessGuid, ProcessId,
                     # Image, ImageLoaded, ...]. Field order depends on the
                     # Sysmon config schema in use -- verify against your
                     # actual Sysmon manifest before relying on index 4.
-                    if ev.EventID == 7 and ev.StringInserts and len(ev.StringInserts) > 4:
+                    elif ev.EventID == 7 and ev.StringInserts and len(ev.StringInserts) > 4:
                         pid = int(ev.StringInserts[2])
                         dll_name = Path(ev.StringInserts[4]).name
                         with self._lock:
                             self._buffers[pid].append(dll_name)
+                        
+                        event_data = {
+                            "event_id": 7,
+                            "utc_time": ev.StringInserts[0],
+                            "process_guid": ev.StringInserts[1],
+                            "pid": pid,
+                            "image": ev.StringInserts[3],
+                            "image_loaded": ev.StringInserts[4],
+                            "dll_name": dll_name,
+                        }
+                        if len(ev.StringInserts) > 13:
+                            event_data.update({
+                                "company": ev.StringInserts[8],
+                                "product": ev.StringInserts[7],
+                                "hashes": ev.StringInserts[10],
+                                "signed": ev.StringInserts[11],
+                                "signature": ev.StringInserts[12],
+                                "signature_status": ev.StringInserts[13],
+                            })
+                        if self.on_sysmon_event:
+                            self.on_sysmon_event(event_data)
+
                 win32evtlog.CloseEventLog(hand)
             except Exception:
                 pass  # log & continue in production; kept minimal here

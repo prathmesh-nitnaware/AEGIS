@@ -181,6 +181,11 @@ def compute_confidence(
             if hasattr(fusion_engine, attr) and not getattr(fusion_engine, attr):
                 resolved_weights[model_key] = 0.0
 
+        if hasattr(fusion_engine, "model_compatibility"):
+            for model_key, comp in fusion_engine.model_compatibility.items():
+                if not comp.get("compatible", True):
+                    resolved_weights[model_key] = 0.0
+
     expected = expected_models or EXPECTED_MODELS_BY_EVENT_TYPE.get(event_type)
     if expected is None:
         logger.warning(

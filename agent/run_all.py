@@ -123,13 +123,14 @@ def _post_event_async(event_payload: dict):
     threading.Thread(target=_send, daemon=True).start()
 
 
-def save_event(model: str, score: float, verdict: str, **extra):
+def save_event(model: str, score: Optional[float], verdict: str, **extra):
     """Append one scored event as a JSON line to telemetry_scores.jsonl and POST to backend API."""
     ts = datetime.now(timezone.utc).isoformat()
+    score_rounded = round(score, 4) if score is not None else None
     event = {
         "timestamp": ts,
         "model": model,
-        "score": round(score, 4),
+        "score": score_rounded,
         "verdict": verdict,
         **extra,
     }
@@ -139,18 +140,20 @@ def save_event(model: str, score: float, verdict: str, **extra):
             f.write(line + "\n")
 
     # Bridge to backend WebSocket API
+    threat_score = float(score) if score is not None else 0.0
+    norm_prob = round(1.0 - threat_score, 4)
     api_payload = {
         "timestamp": ts,
         "model": model,
-        "threat_score": float(score),
+        "threat_score": threat_score,
         "predicted_class": verdict,
         "pid": extra.get("pid", 0),
         "uid": extra.get("uid", 0),
         "process": extra.get("process_name", extra.get("process", extra.get("file_path", model))),
-        "normal_probability": round(1.0 - float(score), 4),
+        "normal_probability": norm_prob,
         "probabilities": {
-            "Normal": round(1.0 - float(score), 4),
-            "Threat": round(float(score), 4),
+            "Normal": norm_prob,
+            "Threat": round(threat_score, 4),
         },
         **extra,
     }
@@ -282,7 +285,80 @@ def start_hdfs() -> None:
 # ===========================================================================
 
 def start_windows_advanced() -> None:
-    win_collector = WindowsAPICollector()
+    from windows_process_context import WindowsProcessContextAggregator
+
+    aggregator = WindowsProcessContextAggregator()
+
+    def handle_sysmon_event(ev: dict):
+        aggregator.process_event(ev)
+        
+        # Score process creations in SHADOW MODE
+        if ev.get("event_id") == 1:
+            guid = ev.get("process_guid")
+            
+            # V2 Shadow Scoring
+            feats_v2 = aggregator.get_features(guid)
+            if feats_v2 is not None:
+                score_v2 = engine.score_windows_v2(feats_v2)
+                if score_v2 is not None:
+                    threshold_v2 = 0.90
+                    if engine._win_v2_payload is not None:
+                        threshold_v2 = engine._win_v2_payload.get("threshold", 0.90)
+                    verdict_v2 = "Attack" if score_v2 >= threshold_v2 else "Normal"
+                    print(f"[windows_v2_shadow] pid={ev.get('pid')} -> {score_v2:.3f} ({verdict_v2})")
+                    save_event("windows_advanced_v2", score_v2, verdict_v2, pid=ev.get("pid"), guid=guid, shadow=True)
+
+            # V3 Shadow Scoring
+            feats_v3 = aggregator.get_features_v3(guid)
+            if feats_v3 is not None:
+                score_v3 = engine.score_windows_v3(feats_v3)
+                if score_v3 is not None:
+                    threshold_v3 = 0.90
+                    if engine._win_v3_payload is not None:
+                        threshold_v3 = engine._win_v3_payload.get("threshold", 0.90)
+                    verdict_v3 = "Attack" if score_v3 >= threshold_v3 else "Normal"
+                    print(f"[windows_v3_shadow] pid={ev.get('pid')} -> {score_v3:.3f} ({verdict_v3})")
+                    save_event(
+                        "windows_advanced_v3", score_v3, verdict_v3,
+                        model_version="v3",
+                        probability_type="raw_xgboost_probability",
+                        threshold=threshold_v3,
+                        pid=ev.get("pid"),
+                        guid=guid,
+                        process_name=ev.get("image"),
+                        parent_process_name=ev.get("parent_image"),
+                        command_line_length=len(ev.get("command_line", "") or ""),
+                        integrity_level=ev.get("integrity_level"),
+                        features=feats_v3,
+                        shadow=True
+                    )
+
+            # V3 Candidate Shadow Scoring
+            feats_cand = aggregator.get_features_v3_candidate(guid)
+            if feats_cand is not None:
+                score_cand = engine.score_windows_v3_candidate(feats_cand)
+                if score_cand is not None:
+                    threshold_cand = 0.90
+                    if engine._win_v3_candidate_payload is not None:
+                        threshold_cand = engine._win_v3_candidate_payload.get("threshold", 0.90)
+                    verdict_cand = "Attack" if score_cand >= threshold_cand else "Normal"
+                    print(f"[windows_v3_candidate_shadow] pid={ev.get('pid')} -> {score_cand:.3f} ({verdict_cand})")
+                    save_event(
+                        "windows_advanced_v3_candidate", score_cand, verdict_cand,
+                        model_version="v3_candidate",
+                        probability_type="raw_xgboost_probability",
+                        threshold=threshold_cand,
+                        pid=ev.get("pid"),
+                        guid=guid,
+                        process_name=ev.get("image"),
+                        parent_process_name=ev.get("parent_image"),
+                        command_line_length=len(ev.get("command_line", "") or ""),
+                        integrity_level=ev.get("integrity_level"),
+                        features=feats_cand,
+                        shadow=True
+                    )
+
+    win_collector = WindowsAPICollector(on_sysmon_event=handle_sysmon_event)
     win_collector.start()  # raises RuntimeError internally if not on Windows
     print("[run_all] Windows Advanced collector started (reading Sysmon log).")
 
@@ -297,6 +373,12 @@ def start_windows_advanced() -> None:
                             verdict = engine.get_verdict(score)
                             print(f"[windows_adv] pid={pid} seq_len={len(seq)} -> {score:.3f} ({verdict})")
                             save_event("windows_advanced", score, verdict, pid=pid, sequence_len=len(seq))
+                        else:
+                            print(f"[windows_adv] pid={pid} seq_len={len(seq)} -> UNAVAILABLE (incompatible telemetry)")
+                            save_event(
+                                "windows_advanced", None, "UNAVAILABLE", pid=pid, sequence_len=len(seq),
+                                reason="training feature representation requires module+offset tokens; live collector provides DLL names"
+                            )
             except Exception:
                 pass
             time.sleep(2.0)

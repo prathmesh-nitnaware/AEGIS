@@ -45,8 +45,10 @@ class LinuxIDSAdapter(LinuxTelemetryCollector):
         """
         score = self.engine.score_process_event(syscall_sequence=sequence)
         if score is None:
-            # Model unavailable/failed -- matches how every other collector
-            # in run_all.py silently skips a None score rather than crashing.
+            self.save_event(
+                "linux_ids", None, "UNAVAILABLE",
+                pid=pid, uid=uid, process=process, timestamp=timestamp,
+            )
             return
 
         verdict = self.engine.get_verdict(score)

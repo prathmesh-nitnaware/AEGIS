@@ -162,6 +162,30 @@ class ThreatFusionEngine:
             }
 
         # ----------------------------------------------------------------
+        # Model 2b - Windows Advanced v2 (Random Forest/XGBoost, process context -> int[6])
+        # ----------------------------------------------------------------
+        self._win_v2_payload = _load_pkl(
+            root / "windows_advanced_v2" / "windows_advanced_v2.pkl",
+            "windows_advanced_v2/payload",
+        )
+
+        # ----------------------------------------------------------------
+        # Model 2c - Windows Advanced v3 (XGBoost, process context -> int[9])
+        # ----------------------------------------------------------------
+        self._win_v3_payload = _load_pkl(
+            root / "windows_advanced_v3" / "windows_advanced_v3.pkl",
+            "windows_advanced_v3/payload",
+        )
+
+        # ----------------------------------------------------------------
+        # Model 2d - Windows Advanced v3 Candidate (XGBoost, process context -> int[9])
+        # ----------------------------------------------------------------
+        self._win_v3_candidate_payload = _load_pkl(
+            root / "windows_advanced_v3" / "windows_advanced_v3_candidate.pkl",
+            "windows_advanced_v3_candidate/payload",
+        )
+
+        # ----------------------------------------------------------------
         # Model 3 - CICIDS Network (LightGBM, tabular network flow features)
         # ----------------------------------------------------------------
         # Quirk: the pkl is a *dict* (not the model directly) with keys:
@@ -334,6 +358,34 @@ class ThreatFusionEngine:
                 classes_str,
             )
 
+        # Model feature compatibility registry
+        self.model_compatibility: Dict[str, Dict[str, Union[bool, str]]] = {
+            "linux": {
+                "compatible": True,
+                "reason": "telemetry produces raw syscall numbers matching training representation",
+            },
+            "windows": {
+                "compatible": False,
+                "reason": "training feature representation requires module+offset tokens; live collector provides DLL names",
+            },
+            "cicids": {
+                "compatible": True,
+                "reason": "telemetry produces network flow features matching model features",
+            },
+            "ember": {
+                "compatible": True,
+                "reason": "telemetry produces PE structural features matching model features",
+            },
+            "hdfs": {
+                "compatible": True,
+                "reason": "telemetry produces log lines matching vectorizer expectation",
+            },
+            "zero_day": {
+                "compatible": True,
+                "reason": "telemetry produces process/event/user/ip features matching model features",
+            },
+        }
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -433,9 +485,9 @@ class ThreatFusionEngine:
         self,
         syscall_sequence: Optional[Sequence[int]] = None,
         api_call_sequence: Optional[Sequence[str]] = None,
-    ) -> Dict[str, Optional[float]]:
+    ) -> Optional[float]:
         """
-        Score a process event against the Linux IDS and/or Windows Advanced model.
+        Score a process event against the Linux IDS or Windows Advanced model.
 
         Parameters
         ----------
@@ -446,15 +498,13 @@ class ThreatFusionEngine:
 
         Returns
         -------
-        dict with keys "linux" and/or "windows", each mapping to a float in
-        [0, 1] or None if the model is unavailable / errored.
+        float in [0, 1] or None if the model is unavailable, errored, or incompatible.
         """
-        results: Dict[str, Optional[float]] = {}
         if syscall_sequence is not None:
-            results["linux"] = self._score_linux(syscall_sequence)
+            return self._score_linux(syscall_sequence)
         if api_call_sequence is not None:
-            results["windows"] = self._score_windows(api_call_sequence)
-        return results
+            return self._score_windows(api_call_sequence)
+        return None
 
     def _score_linux(self, syscall_sequence: Sequence[int]) -> Optional[float]:
         """
@@ -529,6 +579,16 @@ class ThreatFusionEngine:
         from the weighted average until the model is retrained with a proper
         label set.  The one-time warning is already emitted at init.
         """
+        comp = self.model_compatibility.get("windows", {"compatible": True, "reason": ""})
+        if not comp["compatible"]:
+            logger.warning(
+                "Windows Advanced skipped:\nincompatible telemetry representation\n"
+                "expected: module+offset tokens\nreceived: DLL names\n"
+                "reason: %s",
+                comp["reason"]
+            )
+            return None
+
         if self._win_model is None:
             logger.warning("[windows] Model not loaded -- skipping.")
             return None
@@ -565,6 +625,63 @@ class ThreatFusionEngine:
             return float(np.clip(score, 0.0, 1.0))
         except Exception as exc:  # noqa: BLE001
             logger.warning("[windows] Scoring error: %s", exc)
+            return None
+
+    def score_windows_v2(self, features: Sequence[float]) -> Optional[float]:
+        """
+        Score a Windows process context feature vector using the v2 model (Model 2b).
+        Returns the calibrated probability of attack (range [0, 1]).
+        """
+        if self._win_v2_payload is None:
+            return None
+        try:
+            clf = self._win_v2_payload["model"]
+            X = np.array([features])
+            probs = clf.predict_proba(X)[0]
+            if len(probs) > 1:
+                return float(probs[1])
+            else:
+                return float(probs[0])
+        except Exception as exc:
+            logger.warning("[windows_v2] Scoring error: %s", exc)
+            return None
+
+    def score_windows_v3(self, features: Sequence[float]) -> Optional[float]:
+        """
+        Score a Windows process context feature vector using the v3 model (Model 2c).
+        Returns the raw XGBoost threat score (range [0, 1]).
+        """
+        if self._win_v3_payload is None:
+            return None
+        try:
+            clf = self._win_v3_payload["model"]
+            X = np.array([features])
+            probs = clf.predict_proba(X)[0]
+            if len(probs) > 1:
+                return float(probs[1])
+            else:
+                return float(probs[0])
+        except Exception as exc:
+            logger.warning("[windows_v3] Scoring error: %s", exc)
+            return None
+
+    def score_windows_v3_candidate(self, features: Sequence[float]) -> Optional[float]:
+        """
+        Score a Windows process context feature vector using the v3 candidate model.
+        Returns the raw XGBoost threat score (range [0, 1]).
+        """
+        if self._win_v3_candidate_payload is None:
+            return None
+        try:
+            clf = self._win_v3_candidate_payload["model"]
+            X = np.array([features])
+            probs = clf.predict_proba(X)[0]
+            if len(probs) > 1:
+                return float(probs[1])
+            else:
+                return float(probs[0])
+        except Exception as exc:
+            logger.warning("[windows_v3_candidate] Scoring error: %s", exc)
             return None
 
     # ------------------------------------------------------------------
@@ -882,9 +999,9 @@ class ThreatFusionEngine:
         # encoder for that model does not contain recognisable threat labels,
         # so its score has no threat-semantic meaning and must be excluded.
         _validity: Dict[str, bool] = {
-            "linux":   self._linux_labels_valid,
-            "windows": self._windows_labels_valid,
-            "hdfs":    self._hdfs_labels_valid,
+            "linux":   self._linux_labels_valid and self.model_compatibility.get("linux", {}).get("compatible", True),
+            "windows": self._windows_labels_valid and self.model_compatibility.get("windows", {}).get("compatible", True),
+            "hdfs":    self._hdfs_labels_valid and self.model_compatibility.get("hdfs", {}).get("compatible", True),
         }
 
         for model_key, score in scores.items():
@@ -949,8 +1066,7 @@ if __name__ == "__main__":
     # ----------------------------------------------------------------
     # Pad/truncate to 500 happens inside _score_linux
     fake_syscalls = [0, 59, 2, 3, 11, 231] * 80 + [0] * 20   # exactly 500
-    linux_result = engine.score_process_event(syscall_sequence=fake_syscalls)
-    linux_score: Optional[float] = linux_result.get("linux")
+    linux_score = engine.score_process_event(syscall_sequence=fake_syscalls)
     print(f"  Linux IDS score      : {linux_score}")
 
     # ----------------------------------------------------------------
@@ -958,8 +1074,7 @@ if __name__ == "__main__":
     # ----------------------------------------------------------------
     # Unseen tokens will silently map to index 0
     fake_api_calls = ["CreateFile", "WriteFile", "RegSetValue", "OpenProcess"] * 250
-    win_result = engine.score_process_event(api_call_sequence=fake_api_calls)
-    win_score: Optional[float] = win_result.get("windows")
+    win_score = engine.score_process_event(api_call_sequence=fake_api_calls)
     win_label_note = (
         "  [EXCLUDED from fuse -- labels not threat-relevant, see startup warning]"
         if not engine._windows_labels_valid
