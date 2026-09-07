@@ -962,6 +962,15 @@ class ThreatFusionEngine:
             logger.warning("[zero_day] Scoring error: %s", exc)
             return None
 
+    ACTIVE_FUSION_KEYS = frozenset({
+        "linux",
+        "windows",
+        "hdfs",
+        "zero_day",
+        "cicids",
+        "ember",
+    })
+
     # ------------------------------------------------------------------
     # Fusion and verdict
     # ------------------------------------------------------------------
@@ -1005,6 +1014,14 @@ class ThreatFusionEngine:
         }
 
         for model_key, score in scores.items():
+            # Structural defense: Reject shadow detectors (e.g. windows_advanced_v2,
+            # windows_advanced_v3, windows_advanced_v3_candidate) and unknown arbitrary keys.
+            if model_key not in self.ACTIVE_FUSION_KEYS:
+                logger.debug(
+                    "[fuse] Ignoring non-fusion key '%s' (shadow or unknown detector).",
+                    model_key,
+                )
+                continue
             if score is None:
                 continue
             if not _validity.get(model_key, True):   # default True for models without a flag

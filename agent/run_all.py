@@ -87,7 +87,7 @@ parser.add_argument(
     "--os", dest="os_override", default=None, choices=["windows", "linux", "Windows", "Linux"],
     help="Manually force a telemetry profile (windows/linux). Default: auto-detect.",
 )
-args = parser.parse_args()
+args, _ = parser.parse_known_args()
 
 OS_NAME = resolve_os(args.os_override)
 COMPATIBLE_COLLECTORS = collectors_for_platform(OS_NAME)
@@ -126,11 +126,27 @@ def _post_event_async(event_payload: dict):
 def save_event(model: str, score: Optional[float], verdict: str, **extra):
     """Append one scored event as a JSON line to telemetry_scores.jsonl and POST to backend API."""
     ts = datetime.now(timezone.utc).isoformat()
-    score_rounded = round(score, 4) if score is not None else None
+    
+    # Analytical precision: store exact float or None without destructive rounding
+    raw_score = float(score) if score is not None else None
+
+    # Determine explicit score status (available, unavailable, quarantined, shadow, etc.)
+    if "status" in extra:
+        score_status = extra.pop("status")
+    elif extra.get("shadow", False):
+        score_status = "shadow"
+    elif raw_score is not None:
+        score_status = "available"
+    elif verdict == "UNAVAILABLE":
+        score_status = "unavailable"
+    else:
+        score_status = "unavailable"
+
     event = {
         "timestamp": ts,
         "model": model,
-        "score": score_rounded,
+        "score": raw_score,
+        "score_status": score_status,
         "verdict": verdict,
         **extra,
     }
@@ -140,12 +156,14 @@ def save_event(model: str, score: Optional[float], verdict: str, **extra):
             f.write(line + "\n")
 
     # Bridge to backend WebSocket API
-    threat_score = float(score) if score is not None else 0.0
-    norm_prob = round(1.0 - threat_score, 4)
+    # Distinguish None from 0.0: do NOT coerce None to 0.0
+    threat_score = raw_score
+    norm_prob = (1.0 - threat_score) if threat_score is not None else None
     api_payload = {
         "timestamp": ts,
         "model": model,
         "threat_score": threat_score,
+        "score_status": score_status,
         "predicted_class": verdict,
         "pid": extra.get("pid", 0),
         "uid": extra.get("uid", 0),
@@ -153,8 +171,8 @@ def save_event(model: str, score: Optional[float], verdict: str, **extra):
         "normal_probability": norm_prob,
         "probabilities": {
             "Normal": norm_prob,
-            "Threat": round(threat_score, 4),
-        },
+            "Threat": threat_score,
+        } if threat_score is not None else None,
         **extra,
     }
     _post_event_async(api_payload)
@@ -306,7 +324,19 @@ def start_windows_advanced() -> None:
                         threshold_v2 = engine._win_v2_payload.get("threshold", 0.90)
                     verdict_v2 = "Attack" if score_v2 >= threshold_v2 else "Normal"
                     print(f"[windows_v2_shadow] pid={ev.get('pid')} -> {score_v2:.3f} ({verdict_v2})")
-                    save_event("windows_advanced_v2", score_v2, verdict_v2, pid=ev.get("pid"), guid=guid, shadow=True)
+                    save_event(
+                        "windows_advanced_v2", score_v2, verdict_v2,
+                        model_version="v2",
+                        status="shadow",
+                        pid=ev.get("pid"),
+                        guid=guid,
+                        process_name=ev.get("image"),
+                        parent_process_name=ev.get("parent_image"),
+                        command_line=ev.get("command_line", ""),
+                        network_conn_count=feats_v2[5] if len(feats_v2) > 5 else 0.0,
+                        features=feats_v2,
+                        shadow=True
+                    )
 
             # V3 Shadow Scoring
             feats_v3 = aggregator.get_features_v3(guid)
@@ -321,14 +351,17 @@ def start_windows_advanced() -> None:
                     save_event(
                         "windows_advanced_v3", score_v3, verdict_v3,
                         model_version="v3",
+                        status="shadow",
                         probability_type="raw_xgboost_probability",
                         threshold=threshold_v3,
                         pid=ev.get("pid"),
                         guid=guid,
                         process_name=ev.get("image"),
                         parent_process_name=ev.get("parent_image"),
+                        command_line=ev.get("command_line", ""),
                         command_line_length=len(ev.get("command_line", "") or ""),
                         integrity_level=ev.get("integrity_level"),
+                        network_conn_count=feats_v3[5] if len(feats_v3) > 5 else 0.0,
                         features=feats_v3,
                         shadow=True
                     )
@@ -346,14 +379,17 @@ def start_windows_advanced() -> None:
                     save_event(
                         "windows_advanced_v3_candidate", score_cand, verdict_cand,
                         model_version="v3_candidate",
+                        status="shadow",
                         probability_type="raw_xgboost_probability",
                         threshold=threshold_cand,
                         pid=ev.get("pid"),
                         guid=guid,
                         process_name=ev.get("image"),
                         parent_process_name=ev.get("parent_image"),
+                        command_line=ev.get("command_line", ""),
                         command_line_length=len(ev.get("command_line", "") or ""),
                         integrity_level=ev.get("integrity_level"),
+                        network_conn_count=feats_cand[5] if len(feats_cand) > 5 else 0.0,
                         features=feats_cand,
                         shadow=True
                     )
@@ -377,6 +413,7 @@ def start_windows_advanced() -> None:
                             print(f"[windows_adv] pid={pid} seq_len={len(seq)} -> UNAVAILABLE (incompatible telemetry)")
                             save_event(
                                 "windows_advanced", None, "UNAVAILABLE", pid=pid, sequence_len=len(seq),
+                                status="quarantined",
                                 reason="training feature representation requires module+offset tokens; live collector provides DLL names"
                             )
             except Exception:
