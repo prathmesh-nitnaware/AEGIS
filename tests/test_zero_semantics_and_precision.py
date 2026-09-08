@@ -60,7 +60,7 @@ class TestZeroSemanticsAndPrecision(unittest.TestCase):
             captured_lines.append(json.loads(line))
 
         with patch("agent.run_all._post_event_async", side_effect=captured_api.append), \
-             patch("builtins.open", unittest.mock.mock_open()) as m_open:
+             patch("agent.run_all.open", unittest.mock.mock_open()) as m_open:
             ra.save_event("test_model", None, "UNAVAILABLE", status="quarantined")
             # Verify the written json line
             write_calls = m_open().write.call_args_list
@@ -84,7 +84,7 @@ class TestZeroSemanticsAndPrecision(unittest.TestCase):
 
         captured_api = []
         with patch("agent.run_all._post_event_async", side_effect=captured_api.append), \
-             patch("builtins.open", unittest.mock.mock_open()) as m_open:
+             patch("agent.run_all.open", unittest.mock.mock_open()) as m_open:
             ra.save_event("test_model", 0.0, "Normal")
             write_calls = m_open().write.call_args_list
             written_str = "".join(call[0][0] for call in write_calls)
@@ -105,7 +105,7 @@ class TestZeroSemanticsAndPrecision(unittest.TestCase):
 
         small_score = 0.00035954
         with patch("agent.run_all._post_event_async"), \
-             patch("builtins.open", unittest.mock.mock_open()) as m_open:
+             patch("agent.run_all.open", unittest.mock.mock_open()) as m_open:
             ra.save_event("windows_advanced_v3", small_score, "Normal")
             write_calls = m_open().write.call_args_list
             written_str = "".join(call[0][0] for call in write_calls)
@@ -120,7 +120,7 @@ class TestZeroSemanticsAndPrecision(unittest.TestCase):
 
         tiny_score = 0.000031
         with patch("agent.run_all._post_event_async"), \
-             patch("builtins.open", unittest.mock.mock_open()) as m_open:
+             patch("agent.run_all.open", unittest.mock.mock_open()) as m_open:
             ra.save_event("test_model", tiny_score, "Normal")
             write_calls = m_open().write.call_args_list
             written_str = "".join(call[0][0] for call in write_calls)

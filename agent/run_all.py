@@ -452,34 +452,39 @@ def start_linux_ids() -> None:
 # Orchestration -- detect OS, print banner, start only what's compatible
 # ===========================================================================
 
-print_banner(OS_NAME, PROFILE_NAME, COMPATIBLE_COLLECTORS)
+def main():
+    print_banner(OS_NAME, PROFILE_NAME, COMPATIBLE_COLLECTORS)
 
-START_FNS = {
-    "zero_day": start_zero_day,
-    "cicids": start_cicids,
-    "ember": start_ember,
-    "hdfs": start_hdfs,
-    "windows_advanced": start_windows_advanced,
-    "linux_ids": start_linux_ids,
-}
+    START_FNS = {
+        "zero_day": start_zero_day,
+        "cicids": start_cicids,
+        "ember": start_ember,
+        "hdfs": start_hdfs,
+        "windows_advanced": start_windows_advanced,
+        "linux_ids": start_linux_ids,
+    }
 
-print("Starting telemetry collection...\n")
-results = run_collectors(OS_NAME, START_FNS)
+    print("Starting telemetry collection...\n")
+    results = run_collectors(OS_NAME, START_FNS)
 
-# ===========================================================================
-# Keep running
-# ===========================================================================
+    # ===========================================================================
+    # Keep running
+    # ===========================================================================
 
-print("\n[run_all] All available collectors started. Press Ctrl+C to stop.\n")
-try:
-    while True:
-        time.sleep(1)
-except KeyboardInterrupt:
-    print("\n[run_all] Stopping...")
-    for name, handle in _running_handles.items():
-        stop = getattr(handle, "stop", None)
-        if callable(stop):
-            try:
-                stop()
-            except Exception:
-                pass
+    print("\n[run_all] All available collectors started. Press Ctrl+C to stop.\n")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n[run_all] Stopping...")
+        for name, handle in _running_handles.items():
+            stop = getattr(handle, "stop", None)
+            if callable(stop):
+                try:
+                    stop()
+                except Exception:
+                    pass
+
+
+if __name__ == "__main__":
+    main()
