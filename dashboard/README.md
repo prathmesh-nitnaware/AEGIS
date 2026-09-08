@@ -1,16 +1,61 @@
-# React + Vite
+# AEGIS Real-Time Security Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The **AEGIS Security Dashboard** is a modern, real-time web application built with **React** and **Vite** that provides security administrators with live visibility into endpoint telemetry, machine learning threat scores, agent health, and consensus voting states.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 🎨 Features & Interface Panels
 
-## React Compiler
+- **Real-Time Threat Score Gauge**: Displays fused 0.0–1.0 Threat Scores and 4-tier security verdicts (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).
+- **Model Sub-Score Breakdown**: Visualizes predictions from all 6 ML engines (Linux IDS, Windows Advanced v3, CICIDS Network, EMBER PE Binary, HDFS Log Anomaly, Zero-Day Anomaly).
+- **Live Telemetry Feed**: Real-time event stream received via WebSocket connection from the Command Node.
+- **Agent Health & Silence Monitor**: Displays heartbeat status, CPU utilization, degradation status, and silence alarms.
+- **Network Vote Map**: Visual representation of P2P peer consensus voting and node correlation *(Phase 2 Ready)*.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## 🏗️ Architecture & WebSocket Connection
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+The dashboard connects to the AEGIS Command Node via WebSocket:
+```
+ws://127.0.0.1:8000/ws/telemetry
+```
+
+When connected, the server streams real-time JSON frames containing:
+- `agent_id`
+- `timestamp`
+- `fused_score`
+- `verdict`
+- `confidence`
+- `model_scores` (sub-score per ML engine)
+- `heartbeat` (status, cpu)
+
+---
+
+## 🛠️ Setup & Development Commands
+
+### Prerequisites
+- Node.js (v18+)
+- npm or yarn
+
+### Installation
+```bash
+npm install
+```
+
+### Start Development Server
+```bash
+npm run dev
+```
+Starts the Vite dev server at `http://localhost:5173`.
+
+### Production Build
+```bash
+npm run build
+```
+Outputs static assets into the `dist/` directory.
+
+### Preview Production Build
+```bash
+npm run preview
+```
