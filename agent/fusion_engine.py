@@ -446,6 +446,13 @@ class ThreatFusionEngine:
         if not isinstance(feature_dict, dict):
             return np.zeros(len(feature_list), dtype=np.float64)
 
+        # Build normalized key dictionary for fuzzy matching (supports snake_case, spaces, lowercase)
+        norm_dict = {}
+        for k, v in feature_dict.items():
+            norm_k = str(k).strip().lower().replace("_", "").replace(" ", "").replace("/", "").replace(".", "")
+            if norm_k not in norm_dict:
+                norm_dict[norm_k] = v
+
         vals = []
         for idx, col in enumerate(feature_list):
             val = 0.0
@@ -461,6 +468,10 @@ class ThreatFusionEngine:
                 val = feature_dict[idx + 1]
             elif f"F{idx+1}" in feature_dict:
                 val = feature_dict[f"F{idx+1}"]
+            else:
+                norm_col = str(col).strip().lower().replace("_", "").replace(" ", "").replace("/", "").replace(".", "")
+                if norm_col in norm_dict:
+                    val = norm_dict[norm_col]
 
             try:
                 fval = float(val)
