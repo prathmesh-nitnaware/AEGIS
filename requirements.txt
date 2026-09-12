@@ -12,3 +12,9 @@ pandas
 joblib
 psutil
 requests
+# --- Async DB (NeonDB / PostgreSQL + SQLite fallback) ---
+asyncpg
+sqlalchemy[asyncio]
+aiosqlite
+python-dotenv
+dnspython

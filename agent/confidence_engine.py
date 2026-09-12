@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -278,25 +279,28 @@ class AgentTrustTracker:
     def __init__(self, db_path: Union[str, Path] = "aegis_trust.db", alpha: float = 0.2) -> None:
         self.db_path = Path(db_path)
         self.alpha = alpha
-        self._conn = sqlite3.connect(self.db_path)
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS agent_trust (
-                agent_id      TEXT PRIMARY KEY,
-                trust_score   REAL    NOT NULL DEFAULT 0.5,
-                total_events  INTEGER NOT NULL DEFAULT 0,
-                correct_events INTEGER NOT NULL DEFAULT 0,
-                last_updated  TEXT
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        with self._lock:
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS agent_trust (
+                    agent_id      TEXT PRIMARY KEY,
+                    trust_score   REAL    NOT NULL DEFAULT 0.5,
+                    total_events  INTEGER NOT NULL DEFAULT 0,
+                    correct_events INTEGER NOT NULL DEFAULT 0,
+                    last_updated  TEXT
+                )
+                """
             )
-            """
-        )
-        self._conn.commit()
+            self._conn.commit()
 
     def get_trust(self, agent_id: str) -> float:
-        row = self._conn.execute(
-            "SELECT trust_score FROM agent_trust WHERE agent_id = ?", (agent_id,)
-        ).fetchone()
-        return float(row[0]) if row else 0.5
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT trust_score FROM agent_trust WHERE agent_id = ?", (agent_id,)
+            ).fetchone()
+            return float(row[0]) if row else 0.5
 
     def record_outcome(self, agent_id: str, was_correct: bool) -> float:
         """
@@ -308,19 +312,20 @@ class AgentTrustTracker:
         new_trust = self.alpha * (1.0 if was_correct else 0.0) + (1 - self.alpha) * old_trust
         now = datetime.now(timezone.utc).isoformat()
 
-        self._conn.execute(
-            """
-            INSERT INTO agent_trust (agent_id, trust_score, total_events, correct_events, last_updated)
-            VALUES (?, ?, 1, ?, ?)
-            ON CONFLICT(agent_id) DO UPDATE SET
-                trust_score = excluded.trust_score,
-                total_events = agent_trust.total_events + 1,
-                correct_events = agent_trust.correct_events + excluded.correct_events,
-                last_updated = excluded.last_updated
-            """,
-            (agent_id, new_trust, 1 if was_correct else 0, now),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO agent_trust (agent_id, trust_score, total_events, correct_events, last_updated)
+                VALUES (?, ?, 1, ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    trust_score = excluded.trust_score,
+                    total_events = agent_trust.total_events + 1,
+                    correct_events = agent_trust.correct_events + excluded.correct_events,
+                    last_updated = excluded.last_updated
+                """,
+                (agent_id, new_trust, 1 if was_correct else 0, now),
+            )
+            self._conn.commit()
         logger.info(
             "[trust] agent=%s  was_correct=%s  trust %.3f -> %.3f",
             agent_id, was_correct, old_trust, new_trust,

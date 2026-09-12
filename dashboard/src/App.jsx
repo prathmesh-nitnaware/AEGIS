@@ -3,17 +3,22 @@ import {
   Activity,
   AlertTriangle,
   Bell,
+  Calendar,
+  Check,
   CheckCircle2,
   ChevronRight,
   Clock,
   Cpu,
   Database,
   Eye,
+  FileText,
   Filter,
   RefreshCw,
   Server,
   Shield,
   Terminal,
+  ThumbsDown,
+  ThumbsUp,
   Wifi,
   X,
   Zap,
@@ -156,7 +161,183 @@ export default function App() {
   const [clock, setClock] = useState(new Date());
   const [agents, setAgents] = useState({}); // agent_id -> { agentId, status, cpu, alarmed, lastSeen }
 
+  // New Phase D States (NeonDB, Trust Feedback, Maintenance, Silence Alarms, Audit)
+  const [verdicts, setVerdicts] = useState([]);
+  const [maintenanceWindows, setMaintenanceWindows] = useState([]);
+  const [silenceAlarms, setSilenceAlarms] = useState([]);
+  const [agentTrustMap, setAgentTrustMap] = useState({});
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [feedbackToast, setFeedbackToast] = useState(null);
+  const [maintForm, setMaintForm] = useState({
+    agent_id: "*",
+    duration_minutes: 60,
+    reason: "Scheduled Security Patching",
+    approved_by: "SecOps Admin",
+  });
+
+  const showToast = (msg) => {
+    setFeedbackToast(msg);
+    setTimeout(() => setFeedbackToast(null), 4500);
+  };
+
+  const fetchVerdicts = useCallback(async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/centralized/verdicts?limit=50");
+      const data = await res.json();
+      if (data && data.verdicts) setVerdicts(data.verdicts);
+    } catch (e) {
+      console.error("Failed to fetch verdicts:", e);
+    }
+  }, []);
+
+  const fetchMaintenance = useCallback(async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/maintenance/windows?active_only=false");
+      const data = await res.json();
+      if (data && data.windows) setMaintenanceWindows(data.windows);
+    } catch (e) {
+      console.error("Failed to fetch maintenance:", e);
+    }
+  }, []);
+
+  const fetchSilenceAlarms = useCallback(async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/alerts");
+      const data = await res.json();
+      if (data && data.alerts) setSilenceAlarms(data.alerts);
+    } catch (e) {
+      console.error("Failed to fetch alarms:", e);
+    }
+  }, []);
+
+  const fetchAgentTrust = useCallback(async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/agents/trust/all");
+      const data = await res.json();
+      if (data && data.agents) setAgentTrustMap(data.agents);
+    } catch (e) {
+      console.error("Failed to fetch agent trust:", e);
+    }
+  }, []);
+
+  const fetchAudit = useCallback(async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/audit?limit=50");
+      const data = await res.json();
+      if (data && data.entries) setAuditLogs(data.entries);
+    } catch (e) {
+      console.error("Failed to fetch audit:", e);
+    }
+  }, []);
+
+  // Poll active silence alarms and health
+  useEffect(() => {
+    fetchSilenceAlarms();
+    const id = setInterval(fetchSilenceAlarms, 4000);
+    return () => clearInterval(id);
+  }, [fetchSilenceAlarms]);
+
+  // Tab switch fetcher
+  useEffect(() => {
+    if (activeTab === "verdicts") fetchVerdicts();
+    if (activeTab === "maintenance") fetchMaintenance();
+    if (activeTab === "agents") {
+      fetchAgentTrust();
+      fetchSilenceAlarms();
+    }
+    if (activeTab === "audit") fetchAudit();
+  }, [activeTab, fetchVerdicts, fetchMaintenance, fetchAgentTrust, fetchSilenceAlarms, fetchAudit]);
+
+  const handleTrustFeedback = async (voteId, confirmed) => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/trust/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          vote_id: voteId,
+          confirmed: confirmed,
+          confirmed_by: "SecOps Admin",
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(
+          `Verdict ${voteId} marked as ${confirmed ? "CONFIRMED THREAT" : "FALSE POSITIVE"}. Updated trust: ${(data.new_trust_score * 100).toFixed(1)}%`
+        );
+        setVerdicts((prev) =>
+          prev.map((v) =>
+            v.vote_id === voteId
+              ? { ...v, admin_confirmed: confirmed, confirmed_by: "SecOps Admin" }
+              : v
+          )
+        );
+        fetchAgentTrust();
+      } else {
+        showToast(`Feedback error: ${data.detail || "Request failed"}`);
+      }
+    } catch (err) {
+      console.error("Error submitting trust feedback:", err);
+      showToast("Network error submitting feedback");
+    }
+  };
+
+  const handleAcknowledgeAlarm = async (alarmId) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/alerts/${alarmId}/ack`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ acknowledged_by: "SecOps Admin" }),
+      });
+      if (res.ok) {
+        showToast(`Silence alarm #${alarmId} acknowledged`);
+        setSilenceAlarms((prev) => prev.filter((a) => a.id !== alarmId));
+      }
+    } catch (err) {
+      console.error("Error acknowledging alarm:", err);
+    }
+  };
+
+  const handleScheduleMaintenance = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/maintenance/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: maintForm.agent_id,
+          duration_seconds: (maintForm.duration_minutes || 60) * 60,
+          approved_by: maintForm.approved_by,
+          reason: maintForm.reason,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(`Maintenance window scheduled for agent ${maintForm.agent_id}`);
+        fetchMaintenance();
+      } else {
+        showToast(`Failed: ${data.detail || "Could not schedule window"}`);
+      }
+    } catch (err) {
+      console.error("Schedule maintenance error:", err);
+    }
+  };
+
+  const handleCancelMaintenance = async (windowId) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/maintenance/cancel?window_id=${windowId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        showToast("Maintenance window cancelled");
+        fetchMaintenance();
+      }
+    } catch (err) {
+      console.error("Cancel maintenance error:", err);
+    }
+  };
+
   /* Uptime and health check ticker */
+
   useEffect(() => {
     const id1 = setInterval(() => setClock(new Date()), 1000);
     const fetchHealth = async () => {
@@ -245,6 +426,21 @@ export default function App() {
                 ...prev,
               ].slice(0, 10)
             );
+            return;
+          }
+
+          if (event.type === "agent_shutdown") {
+            setAgents((prev) => ({
+              ...prev,
+              [event.agent_id]: {
+                ...(prev[event.agent_id] || { agentId: event.agent_id, cpu: 0 }),
+                agentId: event.agent_id,
+                status: "OFFLINE_GRACEFUL",
+                alarmed: false,
+                reason: event.reason,
+              },
+            }));
+            showToast(`Agent ${event.agent_id} completed graceful shutdown (${event.reason || "Planned offline"})`);
             return;
           }
 
@@ -413,7 +609,7 @@ export default function App() {
         </div>
 
         <nav className="nav-menu">
-          <div className="nav-section">NAVIGATION</div>
+          <div className="nav-section">AEGIS SOC</div>
 
           <button
             className={`nav-item ${activeTab === "overview" ? "active" : ""}`}
@@ -422,6 +618,45 @@ export default function App() {
             <Activity size={16} />
             Security Overview
           </button>
+
+          <button
+            className={`nav-item ${activeTab === "verdicts" ? "active" : ""}`}
+            onClick={() => setActiveTab("verdicts")}
+          >
+            <Database size={16} />
+            Consensus & Feedback
+            {verdicts.length > 0 && <span className="nav-badge">{verdicts.length}</span>}
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === "maintenance" ? "active" : ""}`}
+            onClick={() => setActiveTab("maintenance")}
+          >
+            <Calendar size={16} />
+            Maintenance Windows
+            {maintenanceWindows.filter((w) => w.is_active).length > 0 && (
+              <span className="nav-badge">{maintenanceWindows.filter((w) => w.is_active).length}</span>
+            )}
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === "agents" ? "active" : ""}`}
+            onClick={() => setActiveTab("agents")}
+          >
+            <Server size={16} />
+            Fleet & Trust Tracker
+            {silenceAlarms.length > 0 && <span className="nav-badge alert">{silenceAlarms.length}</span>}
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === "audit" ? "active" : ""}`}
+            onClick={() => setActiveTab("audit")}
+          >
+            <FileText size={16} />
+            Mitigation Audit Log
+          </button>
+
+          <div className="nav-section" style={{ marginTop: 14 }}>TELEMETRY</div>
 
           <button
             className={`nav-item ${activeTab === "processes" ? "active" : ""}`}
@@ -485,6 +720,36 @@ export default function App() {
             </div>
           </div>
         </header>
+
+        {/* ═══ Silence Alarm Alert Banner ═══ */}
+        {silenceAlarms.length > 0 && (
+          <div className="silence-alarm-banner">
+            <div className="alarm-banner-left">
+              <AlertTriangle size={20} className="alarm-pulse-icon" />
+              <div>
+                <strong>CRITICAL: Node Heartbeat Lost ({silenceAlarms.length} active silence alarms)</strong>
+                <div>
+                  Agent <code>{silenceAlarms[0].agent_id}</code> has missed heartbeats (silent for{" "}
+                  {Math.round(silenceAlarms[0].silence_duration || 15)}s). Active threat alarms armed.
+                </div>
+              </div>
+            </div>
+            <button
+              className="btn-ack-alarm"
+              onClick={() => handleAcknowledgeAlarm(silenceAlarms[0].id)}
+            >
+              <CheckCircle2 size={15} /> Acknowledge Alert
+            </button>
+          </div>
+        )}
+
+        {/* ═══ Feedback / Action Toast ═══ */}
+        {feedbackToast && (
+          <div className="feedback-toast">
+            <Check size={16} style={{ color: "#38bdf8" }} />
+            <span>{feedbackToast}</span>
+          </div>
+        )}
 
         {/* Dynamic Metric Cards */}
         <section className="stats-grid">
@@ -898,6 +1163,404 @@ export default function App() {
                 <div className="empty-table-placeholder">
                   <Server size={28} className="muted-icon" />
                   <p>No agents registered yet. Waiting for first heartbeat...</p>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* ═══ TAB: CONSENSUS VERDICTS & TRUST FEEDBACK ═══ */}
+        {activeTab === "verdicts" && (
+          <section className="panel activity-panel">
+            <div className="panel-header">
+              <div>
+                <h3 className="panel-title">
+                  <Database size={16} style={{ display: "inline", verticalAlign: "-2px", marginRight: 8 }} />
+                  Consensus Verdicts & Human Feedback (NeonDB)
+                </h3>
+                <p className="panel-subtitle">
+                  Peer-weighted consensus verdicts with active admin trust calibration
+                </p>
+              </div>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <span className="panel-count-badge">{verdicts.length} Recorded Verdicts</span>
+                <button className="btn-small-pulse" onClick={fetchVerdicts} title="Refresh verdicts from NeonDB">
+                  <RefreshCw size={13} /> Refresh
+                </button>
+              </div>
+            </div>
+
+            <div className="table-wrapper">
+              {verdicts.length > 0 ? (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Vote ID</th>
+                      <th>Origin Agent</th>
+                      <th>Event Type</th>
+                      <th>Raw Score</th>
+                      <th>Weighted Score</th>
+                      <th>Severity</th>
+                      <th>Action Dispatched</th>
+                      <th>Peers</th>
+                      <th>Admin Feedback Loop</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {verdicts.map((v) => (
+                      <tr key={v.vote_id}>
+                        <td><code>{v.vote_id.slice(0, 10)}...</code></td>
+                        <td><strong>{v.origin_agent_id}</strong></td>
+                        <td><span className="syscall-tag">{v.event_type}</span></td>
+                        <td>
+                          <span
+                            className="threat-pill"
+                            style={{
+                              background: getThreatColor(v.raw_threat_score) + "22",
+                              color: getThreatColor(v.raw_threat_score),
+                              borderColor: getThreatColor(v.raw_threat_score) + "55",
+                            }}
+                          >
+                            {((v.raw_threat_score || 0) * 100).toFixed(1)}%
+                          </span>
+                        </td>
+                        <td>
+                          <strong style={{ color: getThreatColor(v.final_weighted_score) }}>
+                            {((v.final_weighted_score || 0) * 100).toFixed(1)}%
+                          </strong>
+                        </td>
+                        <td>
+                          <span className={`verdict-badge ${v.severity === "LOW" ? "normal" : "alert"}`}>
+                            {v.severity}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`action-badge ${v.response_action}`}>
+                            {v.response_action}
+                          </span>
+                        </td>
+                        <td>{v.participating_peers ? v.participating_peers.length : 1}</td>
+                        <td>
+                          <div className="verdicts-actions-cell">
+                            {v.admin_confirmed === true ? (
+                              <span className="feedback-status-badge confirmed">
+                                <Check size={12} /> Confirmed Threat ({v.confirmed_by || "Admin"})
+                              </span>
+                            ) : v.admin_confirmed === false ? (
+                              <span className="feedback-status-badge false-positive">
+                                <X size={12} /> False Positive ({v.confirmed_by || "Admin"})
+                              </span>
+                            ) : (
+                              <>
+                                <button
+                                  className="btn-feedback confirm"
+                                  onClick={() => handleTrustFeedback(v.vote_id, true)}
+                                  title="Confirm malicious threat & reinforce agent trust"
+                                >
+                                  <ThumbsUp size={12} /> Confirm Threat
+                                </button>
+                                <button
+                                  className="btn-feedback false-positive"
+                                  onClick={() => handleTrustFeedback(v.vote_id, false)}
+                                  title="Mark as false positive & decrease agent trust weight"
+                                >
+                                  <ThumbsDown size={12} /> False Positive
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="empty-table-placeholder">
+                  <Database size={28} className="muted-icon" />
+                  <p>No consensus verdicts recorded in NeonDB yet.</p>
+                  <span>Verdicts from peer voting nodes will appear here in real time.</span>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* ═══ TAB: MAINTENANCE WINDOWS ═══ */}
+        {activeTab === "maintenance" && (
+          <section className="maintenance-container">
+            {/* Schedule Form */}
+            <div className="maintenance-form-panel">
+              <div className="panel-header" style={{ marginBottom: 16 }}>
+                <div>
+                  <h3 className="panel-title">
+                    <Calendar size={16} style={{ display: "inline", verticalAlign: "-2px", marginRight: 8 }} />
+                    Schedule Window
+                  </h3>
+                  <p className="panel-subtitle">Dual-approval alarm suppression</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleScheduleMaintenance}>
+                <div className="form-group">
+                  <label className="form-label">Target Agent ID</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    value={maintForm.agent_id}
+                    onChange={(e) => setMaintForm({ ...maintForm, agent_id: e.target.value })}
+                    placeholder="vm1, vm2 or * for all"
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Duration (Minutes)</label>
+                  <input
+                    className="form-input"
+                    type="number"
+                    min="5"
+                    max="1440"
+                    value={maintForm.duration_minutes}
+                    onChange={(e) => setMaintForm({ ...maintForm, duration_minutes: Number(e.target.value) })}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Maintenance Reason</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    value={maintForm.reason}
+                    onChange={(e) => setMaintForm({ ...maintForm, reason: e.target.value })}
+                    placeholder="e.g. Kernel security upgrade"
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Approving Officer</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    value={maintForm.approved_by}
+                    onChange={(e) => setMaintForm({ ...maintForm, approved_by: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <button type="submit" className="btn-primary-action">
+                  <Calendar size={14} /> Schedule Maintenance Window
+                </button>
+              </form>
+            </div>
+
+            {/* List of Windows */}
+            <div className="panel" style={{ background: "#0b1019" }}>
+              <div className="panel-header">
+                <div>
+                  <h3 className="panel-title">Active & Scheduled Windows (NeonDB)</h3>
+                  <p className="panel-subtitle">Windows survive backend restarts</p>
+                </div>
+                <button className="btn-small-pulse" onClick={fetchMaintenance}>
+                  <RefreshCw size={13} /> Refresh
+                </button>
+              </div>
+
+              <div className="windows-list-grid" style={{ marginTop: 16 }}>
+                {maintenanceWindows.length > 0 ? (
+                  maintenanceWindows.map((w) => (
+                    <div className={`window-card ${w.is_active ? "active" : ""}`} key={w.window_id}>
+                      <div className="window-info-main">
+                        <div className="window-title">
+                          <span>Agent: <code>{w.agent_id}</code></span>
+                          <span className={`window-badge ${w.is_active ? "active" : "inactive"}`}>
+                            {w.is_active ? "ACTIVE SUPPRESSION" : "COMPLETED / CANCELLED"}
+                          </span>
+                        </div>
+                        <div className="window-subtitle">
+                          {w.reason} · Approved by: <strong>{w.approved_by}</strong>
+                        </div>
+                        <div className="window-subtitle" style={{ fontSize: 11, color: "#94a3b8" }}>
+                          Window ID: <code>{w.window_id}</code> · Until {new Date(w.end_time * 1000).toLocaleTimeString("en-GB")}
+                        </div>
+                      </div>
+
+                      {w.is_active && (
+                        <button
+                          className="btn-cancel-win"
+                          onClick={() => handleCancelMaintenance(w.window_id)}
+                          title="Revoke maintenance window & re-enable alerts"
+                        >
+                          <X size={13} /> Cancel Window
+                        </button>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="empty-table-placeholder">
+                    <Calendar size={28} className="muted-icon" />
+                    <p>No maintenance windows currently active or scheduled.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* ═══ TAB: FLEET & TRUST TRACKER ═══ */}
+        {activeTab === "agents" && (
+          <section className="panel activity-panel">
+            <div className="panel-header">
+              <div>
+                <h3 className="panel-title">
+                  <Server size={16} style={{ display: "inline", verticalAlign: "-2px", marginRight: 8 }} />
+                  Fleet Health & Consensus Trust Tracker
+                </h3>
+                <p className="panel-subtitle">
+                  Autonomous peer voting weights dynamically scaled by historical accuracy (NeonDB)
+                </p>
+              </div>
+              <button className="btn-small-pulse" onClick={fetchAgentTrust}>
+                <RefreshCw size={13} /> Refresh Trust
+              </button>
+            </div>
+
+            <div className="fleet-grid" style={{ marginTop: 18 }}>
+              {Array.from(new Set([...Object.keys(agents), ...Object.keys(agentTrustMap)])).length > 0 ? (
+                Array.from(new Set([...Object.keys(agents), ...Object.keys(agentTrustMap)])).map((agentId) => {
+                  const live = agents[agentId] || {};
+                  const dbTrust = agentTrustMap[agentId];
+                  const trustScore = dbTrust?.trust_score !== undefined ? dbTrust.trust_score : 0.85;
+                  const trustLevel = trustScore >= 0.85 ? "high" : trustScore >= 0.65 ? "med" : "low";
+
+                  return (
+                    <div className="agent-trust-card" key={agentId}>
+                      <div className="agent-card-header">
+                        <div className="agent-name-box">
+                          <Server size={18} style={{ color: "#38bdf8" }} />
+                          <strong>{agentId}</strong>
+                        </div>
+                        <span
+                          className={`verdict-badge ${
+                            live.alarmed ? "alert" : live.status === "degraded" ? "warning" : "normal"
+                          }`}
+                        >
+                          {live.alarmed ? "SILENT / ALARMED" : live.status || "ACTIVE"}
+                        </span>
+                      </div>
+
+                      <div className="trust-meter-container">
+                        <div className="trust-meter-header">
+                          <span>Consensus Trust Score (EMA)</span>
+                          <strong style={{ color: trustLevel === "high" ? "#34d399" : trustLevel === "med" ? "#fbbf24" : "#f87171" }}>
+                            {(trustScore * 100).toFixed(1)}%
+                          </strong>
+                        </div>
+                        <div className="trust-meter-bar">
+                          <div
+                            className={`trust-meter-fill ${trustLevel}`}
+                            style={{ width: `${Math.max(5, trustScore * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="agent-stats-row">
+                        <div className="agent-stat-item">
+                          <span>CPU Utilization</span>
+                          <strong>{live.cpu !== undefined ? `${live.cpu.toFixed(1)}%` : "N/A"}</strong>
+                        </div>
+                        <div className="agent-stat-item">
+                          <span>Verified Events</span>
+                          <strong>
+                            {dbTrust ? `${dbTrust.correct_events} / ${dbTrust.total_events}` : "Initializing"}
+                          </strong>
+                        </div>
+                        <div className="agent-stat-item">
+                          <span>Voting Multiplier</span>
+                          <strong>{trustScore >= 0.85 ? "2.0x (Verified)" : trustScore >= 0.65 ? "1.0x (Standard)" : "0.5x (Degraded)"}</strong>
+                        </div>
+                        <div className="agent-stat-item">
+                          <span>Last Heartbeat</span>
+                          <strong>{live.lastSeen ? formatTimestamp(live.lastSeen) : "Live"}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="empty-table-placeholder">
+                  <Server size={28} className="muted-icon" />
+                  <p>No agents registered yet.</p>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* ═══ TAB: MITIGATION AUDIT LOG ═══ */}
+        {activeTab === "audit" && (
+          <section className="panel activity-panel">
+            <div className="panel-header">
+              <div>
+                <h3 className="panel-title">
+                  <FileText size={16} style={{ display: "inline", verticalAlign: "-2px", marginRight: 8 }} />
+                  Automated Mitigation & Audit Trail (NeonDB)
+                </h3>
+                <p className="panel-subtitle">
+                  Tamper-evident record of process kills, host isolations, and quarantine actions
+                </p>
+              </div>
+              <button className="btn-small-pulse" onClick={fetchAudit}>
+                <RefreshCw size={13} /> Refresh Audit
+              </button>
+            </div>
+
+            <div className="table-wrapper">
+              {auditLogs.length > 0 ? (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Origin Node</th>
+                      <th>Action Executed</th>
+                      <th>Target Identifier</th>
+                      <th>Status</th>
+                      <th>Details / Verdict Reference</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditLogs.map((log) => (
+                      <tr key={log.id}>
+                        <td>{formatTimestamp(log.executed_at)}</td>
+                        <td><strong>{log.agent_id}</strong></td>
+                        <td>
+                          <span className={`action-badge ${log.action}`}>
+                            {log.action}
+                          </span>
+                        </td>
+                        <td>
+                          <code>
+                            {log.target_pid ? `PID ${log.target_pid}` : log.target_file || "Host Firewall"}
+                          </code>
+                        </td>
+                        <td>
+                          <span className={`audit-status-tag ${log.status || "SUCCESS"}`}>
+                            {log.status || "SUCCESS"}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: 12, color: "#94a3b8" }}>
+                          {log.details ? (typeof log.details === "object" ? JSON.stringify(log.details) : log.details) : `Ref Vote: ${log.vote_id || "N/A"}`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="empty-table-placeholder">
+                  <FileText size={28} className="muted-icon" />
+                  <p>No response action audit entries found in NeonDB.</p>
+                  <span>Automated response actions dispatched by AEGIS will be permanently logged here.</span>
                 </div>
               )}
             </div>

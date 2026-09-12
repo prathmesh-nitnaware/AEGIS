@@ -317,11 +317,32 @@ class SilenceDetector:
         cpu = float(payload.get("cpu", 0.0))
 
         with self._lock:
+            # Check for graceful shutdown packet
+            if status in ("OFFLINE_GRACEFUL", "shutting_down", "shutdown"):
+                if agent_id in self._agents:
+                    agent = self._agents[agent_id]
+                    agent.status = "OFFLINE_GRACEFUL"
+                    agent.last_seen = now
+                    agent.alarm_raised = False
+                else:
+                    self._agents[agent_id] = AgentState(
+                        agent_id=agent_id,
+                        last_seen=now,
+                        status="OFFLINE_GRACEFUL",
+                        cpu=0.0,
+                        alarm_raised=False,
+                    )
+                logger.info(
+                    "[SilenceDetector] Agent '%s' reported GRACEFUL SHUTDOWN (silence alarms suppressed)",
+                    agent_id,
+                )
+                return
+
             if agent_id in self._agents:
                 agent = self._agents[agent_id]
-                if agent.alarm_raised:
+                if agent.alarm_raised or agent.status == "OFFLINE_GRACEFUL":
                     logger.info(
-                        "[SilenceDetector] Agent '%s' RECOVERED (heartbeat received after silence alarm)",
+                        "[SilenceDetector] Agent '%s' RETURNED ONLINE (heartbeat received)",
                         agent_id,
                     )
                 agent.last_seen = now
@@ -338,18 +359,49 @@ class SilenceDetector:
                 )
                 logger.info("[SilenceDetector] Registered new agent tracking for '%s'", agent_id)
 
+    def record_shutdown(self, agent_id: str, reason: str = "user_shutdown") -> None:
+        """
+        Mark an agent as gracefully offline (e.g. user-initiated OS shutdown or reboot),
+        suppressing silent alarms for this node.
+        """
+        now = time.time()
+        with self._lock:
+            if agent_id in self._agents:
+                agent = self._agents[agent_id]
+                agent.status = "OFFLINE_GRACEFUL"
+                agent.last_seen = now
+                agent.alarm_raised = False
+            else:
+                self._agents[agent_id] = AgentState(
+                    agent_id=agent_id,
+                    last_seen=now,
+                    status="OFFLINE_GRACEFUL",
+                    cpu=0.0,
+                    alarm_raised=False,
+                )
+        logger.info(
+            "[SilenceDetector] Agent '%s' marked OFFLINE_GRACEFUL (reason: %s; silence alarm suppressed)",
+            agent_id,
+            reason,
+        )
+
     def _check_silence(self) -> List[Dict[str, Any]]:
         """
         Evaluate all tracked agents against the silence threshold.
 
         Returns a list of generated alarm payloads for agents whose silence
         breached the threshold and have not yet been flagged.
+        Gracefully offline agents are skipped.
         """
         now = time.time()
         alarms_to_fire: List[Dict[str, Any]] = []
 
         with self._lock:
             for agent_id, agent in self._agents.items():
+                # Skip agents that performed an intentional/graceful shutdown
+                if agent.status in ("OFFLINE_GRACEFUL", "shutdown", "shutting_down"):
+                    continue
+
                 silence_duration = now - agent.last_seen
                 if silence_duration >= self.silence_threshold and not agent.alarm_raised:
                     agent.alarm_raised = True
