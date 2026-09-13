@@ -93,11 +93,24 @@ if DATABASE_URL.startswith("postgresql"):
         DATABASE_URL = DATABASE_URL.replace("&channel_binding=require", "").replace("?channel_binding=require", "")
     _connect_args = {"ssl": "require"}
 
+import sys
+from sqlalchemy.pool import NullPool
+
+# Detect if running inside pytest or test harness
+_is_test_env = "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
+
+_engine_kwargs = {
+    "echo": False,
+    "connect_args": _connect_args if DATABASE_URL.startswith("postgresql") else {},
+}
+if _is_test_env:
+    _engine_kwargs["poolclass"] = NullPool
+else:
+    _engine_kwargs["pool_pre_ping"] = True
+
 engine = create_async_engine(
     DATABASE_URL,
-    echo=False,          # set True to log every SQL statement during dev
-    pool_pre_ping=True,  # detect stale connections (important for NeonDB idle timeout)
-    connect_args=_connect_args if DATABASE_URL.startswith("postgresql") else {},
+    **_engine_kwargs,
 )
 
 # ---------------------------------------------------------------------------

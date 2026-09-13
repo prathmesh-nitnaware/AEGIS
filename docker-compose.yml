@@ -1,0 +1,187 @@
+# ===========================================================================
+# AEGIS — Docker Compose Multi-Node Cluster
+# docker-compose.yml
+# ===========================================================================
+#
+# Architecture:
+#   ┌─────────────────────────────────────────────────────────┐
+#   │                  aegis-network (bridge)                 │
+#   │                                                         │
+#   │  ┌──────────────┐    ┌───────────┐  ┌───────────────┐  │
+#   │  │  dashboard   │    │  command  │  │   agent-vm1   │  │
+#   │  │  (nginx:80)  │◄──►│  node     │◄►│   agent-vm2   │  │
+#   │  │  :5173→80    │    │  :8000    │  │   agent-vm3   │  │
+#   │  └──────────────┘    └─────┬─────┘  └───────────────┘  │
+#   │                            │ NeonDB (external cloud)    │
+#   └────────────────────────────┴────────────────────────────┘
+#
+# Usage:
+#   # Start entire cluster:
+#   docker compose up --build
+#
+#   # Run attack simulations against the cluster:
+#   docker compose exec agent-vm1 python -m experiments.simulations.run_multi_node_demo --all
+#
+#   # View live logs:
+#   docker compose logs -f
+#
+#   # Shut down and remove containers:
+#   docker compose down -v
+# ===========================================================================
+
+name: aegis
+
+networks:
+  aegis-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  # Shared quarantine directory (mounted into all agents for file quarantine ops)
+  aegis-quarantine:
+  # Audit log persistence across container restarts
+  aegis-audit-logs:
+  # SQLite fallback if NeonDB is not configured
+  aegis-db:
+
+# ---------------------------------------------------------------------------
+# COMMAND NODE — FastAPI backend, WebSocket broadcaster, consensus coordinator
+# ---------------------------------------------------------------------------
+services:
+  command-node:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: aegis-command-node
+    hostname: command-node
+    networks:
+      aegis-network:
+        ipv4_address: 172.30.0.10
+    ports:
+      - "8000:8000"   # REST API + WebSocket
+    env_file:
+      - .env.docker
+    environment:
+      AGENT_ID: command-node
+      COMMAND_NODE_URL: http://command-node:8000
+    volumes:
+      - aegis-db:/app/db
+      - aegis-audit-logs:/app/logs
+      - aegis-quarantine:/app/quarantine
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # DASHBOARD — React + Nginx serving the SPA + proxying to command-node
+  # ---------------------------------------------------------------------------
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+      args:
+        VITE_COMMAND_NODE_URL: http://localhost:8000
+    container_name: aegis-dashboard
+    hostname: dashboard
+    networks:
+      - aegis-network
+    ports:
+      - "5173:80"     # Accessible at http://localhost:5173
+    depends_on:
+      command-node:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # EDR AGENT vm1 — simulated Linux monitoring node (Hydra / Meterpreter)
+  # ---------------------------------------------------------------------------
+  agent-vm1:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: aegis-agent-vm1
+    hostname: agent-vm1
+    networks:
+      aegis-network:
+        ipv4_address: 172.30.0.21
+    env_file:
+      - .env.docker
+    environment:
+      AGENT_ID: vm1-linux
+      COMMAND_NODE_URL: http://command-node:8000
+      HEARTBEAT_INTERVAL: "5.0"
+      POLL_INTERVAL: "2.0"
+    volumes:
+      - aegis-quarantine:/app/quarantine
+      - aegis-audit-logs:/app/logs
+    depends_on:
+      command-node:
+        condition: service_healthy
+    # Expose P2P peer-voting mesh port
+    ports:
+      - "9021:9001"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # EDR AGENT vm2 — simulated Windows monitoring node (Ransomware / PE dropper)
+  # ---------------------------------------------------------------------------
+  agent-vm2:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: aegis-agent-vm2
+    hostname: agent-vm2
+    networks:
+      aegis-network:
+        ipv4_address: 172.30.0.22
+    env_file:
+      - .env.docker
+    environment:
+      AGENT_ID: vm2-windows
+      COMMAND_NODE_URL: http://command-node:8000
+      HEARTBEAT_INTERVAL: "5.0"
+      POLL_INTERVAL: "2.0"
+    volumes:
+      - aegis-quarantine:/app/quarantine
+      - aegis-audit-logs:/app/logs
+    depends_on:
+      command-node:
+        condition: service_healthy
+    ports:
+      - "9022:9001"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # EDR AGENT vm3 — simulated server node (adversary tamper / silence alarm)
+  # ---------------------------------------------------------------------------
+  agent-vm3:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: aegis-agent-vm3
+    hostname: agent-vm3
+    networks:
+      aegis-network:
+        ipv4_address: 172.30.0.23
+    env_file:
+      - .env.docker
+    environment:
+      AGENT_ID: vm3-server
+      COMMAND_NODE_URL: http://command-node:8000
+      HEARTBEAT_INTERVAL: "5.0"
+      POLL_INTERVAL: "2.0"
+    volumes:
+      - aegis-quarantine:/app/quarantine
+      - aegis-audit-logs:/app/logs
+    depends_on:
+      command-node:
+        condition: service_healthy
+    ports:
+      - "9023:9001"
+    restart: unless-stopped

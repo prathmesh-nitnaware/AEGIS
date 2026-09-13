@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Server,
   Shield,
+  Target,
   Terminal,
   ThumbsDown,
   ThumbsUp,
@@ -33,6 +34,9 @@ import {
   ReferenceLine,
 } from "recharts";
 import "./App.css";
+import MitreAttackTab from "./MitreAttackTab";
+import SimulationLabTab from "./SimulationLabTab";
+import ReportModal from "./ReportModal";
 
 /* ═══════════════════════════════════════════════
    Comprehensive Syscall Mapping Dictionary
@@ -174,6 +178,8 @@ export default function App() {
     reason: "Scheduled Security Patching",
     approved_by: "SecOps Admin",
   });
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [latestWsEvent, setLatestWsEvent] = useState(null);
 
   const showToast = (msg) => {
     setFeedbackToast(msg);
@@ -383,6 +389,7 @@ export default function App() {
       ws.onmessage = (message) => {
         try {
           const event = JSON.parse(message.data);
+          setLatestWsEvent(event);
 
           // Per-agent heartbeat/silent-alarm events - handled separately
           // from the general telemetry stream below, and BEFORE the
@@ -683,6 +690,22 @@ export default function App() {
             <Shield size={16} />
             ML Inference Engine
           </button>
+
+          <button
+            className={`nav-item ${activeTab === "mitre" ? "active" : ""}`}
+            onClick={() => setActiveTab("mitre")}
+          >
+            <Target size={16} />
+            MITRE ATT&amp;CK Matrix
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === "simulation" ? "active" : ""}`}
+            onClick={() => setActiveTab("simulation")}
+          >
+            <Zap size={16} />
+            Red Team Simulation Lab
+          </button>
         </nav>
 
         <div className="agent-status-card">
@@ -706,6 +729,19 @@ export default function App() {
           </div>
 
           <div className="topbar-actions">
+            <button
+              className="btn-test-pulse"
+              onClick={() => setIsReportModalOpen(true)}
+              style={{
+                background: "linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(37, 99, 235, 0.3) 100%)",
+                border: "1px solid rgba(59, 130, 246, 0.5)",
+                color: "#38bdf8",
+              }}
+              title="Generate Executive / Incident Compliance PDF Report"
+            >
+              <FileText size={14} /> Export Security Report
+            </button>
+
             <button className="btn-test-pulse" onClick={sendTestPulse} title="Trigger mock telemetry packet">
               <Zap size={14} /> Send Test Event
             </button>
@@ -1621,6 +1657,27 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* TAB: MITRE ATT&CK MATRIX */}
+        {activeTab === "mitre" && (
+          <section className="content-grid" style={{ display: "block" }}>
+            <MitreAttackTab />
+          </section>
+        )}
+
+        {/* TAB: RED TEAM SIMULATION LAB */}
+        {activeTab === "simulation" && (
+          <section className="content-grid" style={{ display: "block" }}>
+            <SimulationLabTab apiBase="http://127.0.0.1:8000" wsData={latestWsEvent} />
+          </section>
+        )}
+
+        {/* Executive / Incident Report Modal */}
+        <ReportModal
+          isOpen={isReportModalOpen}
+          onClose={() => setIsReportModalOpen(false)}
+          apiBase="http://127.0.0.1:8000"
+        />
       </main>
     </div>
   );

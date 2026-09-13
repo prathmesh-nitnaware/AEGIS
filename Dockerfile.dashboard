@@ -1,0 +1,45 @@
+# ===========================================================================
+# AEGIS — React Security Dashboard
+# Dockerfile.dashboard
+# ===========================================================================
+# Stage 1: Builder — build the Vite + React static bundle
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files and install dependencies
+COPY dashboard/package.json dashboard/package-lock.json ./
+RUN npm ci --silent
+
+# Copy all dashboard source
+COPY dashboard/ ./
+
+# Build the production bundle
+# The VITE_COMMAND_NODE_URL build arg lets us inject the backend URL at build
+# time so the frontend points to the correct WebSocket + REST endpoint.
+ARG VITE_COMMAND_NODE_URL=http://localhost:8000
+ENV VITE_COMMAND_NODE_URL=${VITE_COMMAND_NODE_URL}
+
+RUN npm run build
+
+# ===========================================================================
+# Stage 2: Serve with nginx (lightweight, production-grade static server)
+FROM nginx:1.27-alpine AS runtime
+
+# Remove default nginx config
+RUN rm /etc/nginx/conf.d/default.conf
+
+# Add custom AEGIS nginx config that:
+#  - Serves the SPA from /app/dist on port 80
+#  - Proxies /api/* and /ws/* requests to the Command Node
+COPY docker/nginx.conf /etc/nginx/conf.d/aegis.conf
+
+# Copy the built bundle from the builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -qO- http://localhost/index.html > /dev/null || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

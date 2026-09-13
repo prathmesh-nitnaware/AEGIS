@@ -1,0 +1,66 @@
+# ===========================================================================
+# AEGIS — .dockerignore
+# Prevents large/sensitive files from being sent to the Docker build context.
+# ===========================================================================
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Test artifacts
+.pytest_cache/
+*.log
+.coverage
+htmlcov/
+
+# Dataset (very large — not needed in containers)
+Dataset/
+
+# Node / frontend build artifacts (built inside the dashboard container)
+dashboard/node_modules/
+dashboard/dist/
+node_modules/
+
+# Local SQLite databases (managed via Docker volumes)
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets
+.env
+# .env.docker is intentionally kept (safe template with no real credentials)
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# AEGIS quarantine (kept in volume, not baked into image)
+.aegis_quarantine/
+agent/telemetry_output/
+
+# ML Notebooks (not needed at runtime, large)
+ml_notebooks/
+
+# Scratch / experiments (not needed in production image)
+scratch/
+
+# OS artifacts
+.DS_Store
+Thumbs.db

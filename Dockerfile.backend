@@ -1,0 +1,63 @@
+# ===========================================================================
+# AEGIS — Command Node Backend
+# Dockerfile.backend
+# ===========================================================================
+# Stage 1: Builder — install all Python dependencies into a clean virtual env
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# Install OS-level build deps required by some packages (e.g. asyncpg, lief)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libssl-dev \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy only requirements so Docker layer caches the pip install
+COPY requirements.txt .
+
+# Install into isolated prefix so we can copy it cleanly
+RUN pip install --upgrade pip \
+    && pip install --prefix=/install --no-cache-dir \
+        # pywin32 is Windows-only — skip it explicitly on Linux
+        $(grep -v 'pywin32' requirements.txt | grep -v '^#' | grep -v '^$' | tr '\n' ' ')
+
+# ===========================================================================
+# Stage 2: Runtime image
+FROM python:3.11-slim AS runtime
+
+WORKDIR /app
+
+# Copy installed packages from builder stage
+COPY --from=builder /install /usr/local
+
+# Copy project source code
+COPY backend/       backend/
+COPY agent/         agent/
+COPY conftest.py    conftest.py
+COPY trained_models/ trained_models/
+
+# Create quarantine and audit directories
+RUN mkdir -p /app/quarantine /app/logs
+
+# Environment defaults (override via docker-compose or --env-file)
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    AGENT_ID=command-node \
+    COMMAND_NODE_URL=http://command-node:8000 \
+    HEARTBEAT_INTERVAL=5.0
+
+# Expose the FastAPI port
+EXPOSE 8000
+
+# Health check — hits the lightweight /api/health endpoint
+HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" || exit 1
+
+# Entrypoint: run uvicorn with the FastAPI app
+CMD ["python", "-m", "uvicorn", "backend.main:app", \
+     "--host", "0.0.0.0", "--port", "8000", \
+     "--workers", "1", "--log-level", "info"]

@@ -1494,4 +1494,12 @@ tr.highlight-row {
 .audit-status-tag.BLOCKED {
   background: rgba(239, 68, 68, 0.15);
   color: #f87171;
-}
+}
+
+/* ═══════════════════════════════════════════════
+   MITRE ATT&CK Tab — Animations
+   ═══════════════════════════════════════════════ */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

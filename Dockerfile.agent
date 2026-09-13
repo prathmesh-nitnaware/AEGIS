@@ -1,0 +1,52 @@
+# ===========================================================================
+# AEGIS — EDR Agent (Linux Simulation Node)
+# Dockerfile.agent
+# ===========================================================================
+# Simulates an AEGIS-monitored Linux endpoint.
+# Runs: heartbeat_runner + action_consumer daemon.
+# In a real deployment the full run_all.py with live Scapy/bpftrace would
+# also be activated — but for the Docker demo we use the simulation scripts.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# OS build deps for asyncpg, lief, and psutil
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libssl-dev \
+    libffi-dev \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install
+COPY requirements.txt .
+RUN pip install --upgrade pip \
+    && pip install --no-cache-dir \
+        $(grep -v 'pywin32' requirements.txt | grep -v '^#' | grep -v '^$' | tr '\n' ' ')
+
+# Copy project source
+COPY agent/         agent/
+COPY backend/       backend/
+COPY trained_models/ trained_models/
+COPY conftest.py    conftest.py
+
+# Create quarantine and audit directories
+RUN mkdir -p /app/quarantine /app/logs
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    AGENT_ID=agent-vm1 \
+    COMMAND_NODE_URL=http://command-node:8000 \
+    HEARTBEAT_INTERVAL=5.0 \
+    POLL_INTERVAL=2.0
+
+# Expose P2P mesh port for agent-to-agent peer voting
+EXPOSE 9001
+
+# Copy entrypoint script
+COPY docker/agent-entrypoint.sh /app/agent-entrypoint.sh
+RUN chmod +x /app/agent-entrypoint.sh
+
+ENTRYPOINT ["/app/agent-entrypoint.sh"]

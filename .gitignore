@@ -9,3 +9,5 @@ dashboard/node_modules/
 dashboard/dist/
 # Environment — contains DB credentials, never commit
 .env
+# Docker env (contains real credentials if customized — keep template only)
+# .env.docker  ← committed as safe template; do not add credentials here
