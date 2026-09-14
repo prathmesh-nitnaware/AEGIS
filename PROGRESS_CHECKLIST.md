@@ -8,7 +8,8 @@
 - **Phase A — NeonDB Persistence Layer:** 9 / 9 items complete (100.0%) — *All 7 tables created, all write paths wired*
 - **Phase B — Response Driver Hardening:** 2 / 2 items complete (100.0%) — *Real firewall commands, real unisolate*
 - **Phase C — Trust Feedback Loop:** 3 / 3 items complete (100.0%) — *POST /api/trust/feedback wired*
-- **Overall Completion:** 77 / 77 items complete (100.0%)
+- **Cross-Platform Daemon Packaging & Installers:** 6 / 6 items complete (100.0%) — *Linux Systemd, Windows PowerShell, Doctor Probes, Standalone Distribution Bundles*
+- **Overall Completion:** 83 / 83 items complete (100.0%)
 
 ---
 
@@ -154,6 +155,14 @@
 - **Phase D (COMPLETE):** Dashboard UI — Global Silence Alarm banner with instant acknowledge action, Consensus Verdicts NeonDB table with "Confirm Threat" and "False Positive" trust calibration buttons, Maintenance Window management portal with dual-approval scheduling and cancellation, Fleet Health & NeonDB Trust Meter (EMA) visualization, and Mitigation Audit Trail.
 - **Phase 5 (COMPLETE):** Multi-node attack simulation suite (`experiments/simulations/` with Linux Hydra/Meterpreter attacks, Windows Ransomware/PE dropper, adversary silence sabotage, and master runner `run_multi_node_demo.py`).
 - **Graceful Shutdown & Heartbeat Lifecycle (COMPLETE):** OS shutdown hooks (Windows `win32api.SetConsoleCtrlHandler` & Linux `SIGTERM`), emergency synchronous Last-Gasp goodbye beacon (`POST /api/heartbeat/shutdown`), `OFFLINE_GRACEFUL` state, silence alarm suppression, and automatic reconnection on boot.
+- **Cross-Platform Agent Daemon Packaging & Installers (COMPLETE):**
+  - [x] Unified Agent Configuration Manager (`agent/config.py` + `agent/config/agent.env.example`) with multi-source hierarchy (CLI, env, config files `/etc/aegis/agent.conf` and `C:\ProgramData\AEGIS\agent.conf`).
+  - [x] Daemon Service Orchestrator (`agent/daemon_service.py`) supporting `start`, `stop`, `status`, `config`, and `doctor` subcommands.
+  - [x] Pre-flight Diagnostic Probe (`run_doctor()`) verifying Python runtime (3.10+), OS specifics, 6 ML model artifact weights, Command Node network reachability, and quarantine filesystem permissions.
+  - [x] Linux Systemd Service (`scripts/linux/aegis-agent.service`) + automated Bash installer (`scripts/linux/install.sh`) & uninstaller (`scripts/linux/uninstall.sh`).
+  - [x] Windows PowerShell Installer (`scripts/windows/install.ps1`) & uninstaller (`scripts/windows/uninstall.ps1`) registering `AEGIS-EDR-Agent` Scheduled Service.
+  - [x] Standalone Distribution Packager (`scripts/package_agent.py`) building standalone `.tar.gz` and `.zip` distribution bundles with SHA-256 integrity manifests in `dist/agent_packages/`.
+  - [x] Automated packaging & diagnostic verification suite (`tests/test_agent_packaging.py` — 7/7 PASSED).
 
 
 ---

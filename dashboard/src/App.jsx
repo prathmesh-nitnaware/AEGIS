@@ -3,6 +3,7 @@ import {
   Activity,
   AlertTriangle,
   Bell,
+  BrainCircuit,
   Calendar,
   Check,
   CheckCircle2,
@@ -13,6 +14,7 @@ import {
   Eye,
   FileText,
   Filter,
+  Gauge,
   RefreshCw,
   Server,
   Shield,
@@ -23,6 +25,8 @@ import {
   Wifi,
   X,
   Zap,
+  Radio,
+  Skull,
 } from "lucide-react";
 import {
   AreaChart,
@@ -37,6 +41,9 @@ import "./App.css";
 import MitreAttackTab from "./MitreAttackTab";
 import SimulationLabTab from "./SimulationLabTab";
 import ReportModal from "./ReportModal";
+import XAIExplanationModal from "./XAIExplanationModal";
+import BenchmarkTab from "./BenchmarkTab";
+import PcapReplayerTab from "./PcapReplayerTab";
 
 /* ═══════════════════════════════════════════════
    Comprehensive Syscall Mapping Dictionary
@@ -180,6 +187,12 @@ export default function App() {
   });
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [latestWsEvent, setLatestWsEvent] = useState(null);
+  const [xaiModalConfig, setXaiModalConfig] = useState({
+    isOpen: false,
+    modelKey: "linux_ids",
+    threatScore: 0.94,
+    eventData: null,
+  });
 
   const showToast = (msg) => {
     setFeedbackToast(msg);
@@ -706,6 +719,22 @@ export default function App() {
             <Zap size={16} />
             Red Team Simulation Lab
           </button>
+
+          <button
+            className={`nav-item ${activeTab === "benchmark" ? "active" : ""}`}
+            onClick={() => setActiveTab("benchmark")}
+          >
+            <Gauge size={16} />
+            System Benchmarks
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === "pcap" ? "active" : ""}`}
+            onClick={() => setActiveTab("pcap")}
+          >
+            <Radio size={16} />
+            PCAP Capture & Replayer
+          </button>
         </nav>
 
         <div className="agent-status-card">
@@ -731,6 +760,26 @@ export default function App() {
           <div className="topbar-actions">
             <button
               className="btn-test-pulse"
+              onClick={() =>
+                setXaiModalConfig({
+                  isOpen: true,
+                  modelKey: "linux_ids",
+                  threatScore: 0.97,
+                  eventData: latestEvent,
+                })
+              }
+              style={{
+                background: "linear-gradient(135deg, rgba(168, 85, 247, 0.2) 0%, rgba(139, 92, 246, 0.3) 100%)",
+                border: "1px solid rgba(168, 85, 247, 0.5)",
+                color: "#c084fc",
+              }}
+              title="Explain Model Predictions via SHAP Feature Attributions"
+            >
+              <BrainCircuit size={14} /> Explain AI (XAI)
+            </button>
+
+            <button
+              className="btn-test-pulse"
               onClick={() => setIsReportModalOpen(true)}
               style={{
                 background: "linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(37, 99, 235, 0.3) 100%)",
@@ -741,6 +790,26 @@ export default function App() {
             >
               <FileText size={14} /> Export Security Report
             </button>
+
+            <a
+              href="http://localhost:5174"
+              target="_blank"
+              rel="noreferrer"
+              className="btn-test-pulse"
+              style={{
+                background: "linear-gradient(135deg, rgba(239, 68, 68, 0.25) 0%, rgba(185, 28, 28, 0.35) 100%)",
+                border: "1px solid rgba(239, 68, 68, 0.6)",
+                color: "#f87171",
+                textDecoration: "none",
+                fontWeight: "700",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+              title="Open Standalone Red Team Adversary C2 Attack Dashboard (Port 5174)"
+            >
+              <Skull size={14} /> Attacker C2 Console
+            </a>
 
             <button className="btn-test-pulse" onClick={sendTestPulse} title="Trigger mock telemetry packet">
               <Zap size={14} /> Send Test Event
@@ -1649,6 +1718,37 @@ export default function App() {
                   </div>
                 </div>
 
+                <div style={{ margin: "14px 0" }}>
+                  <button
+                    onClick={() =>
+                      setXaiModalConfig({
+                        isOpen: true,
+                        modelKey: selectedProcess.model || "linux_ids",
+                        threatScore: selectedProcess.threat_score || 0.94,
+                        eventData: selectedProcess,
+                      })
+                    }
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      width: "100%",
+                      justifyContent: "center",
+                      background: "linear-gradient(135deg, rgba(168, 85, 247, 0.2) 0%, rgba(139, 92, 246, 0.3) 100%)",
+                      border: "1px solid rgba(168, 85, 247, 0.5)",
+                      color: "#c084fc",
+                      padding: "10px",
+                      borderRadius: "6px",
+                      fontWeight: "700",
+                      fontSize: "0.85rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <BrainCircuit size={16} />
+                    Drill Down Feature Attributions (SHAP Waterfall)
+                  </button>
+                </div>
+
                 <div className="modal-section-title">Raw Telemetry Event Payload</div>
                 <pre className="json-code">
                   {JSON.stringify(selectedProcess, null, 2)}
@@ -1672,10 +1772,44 @@ export default function App() {
           </section>
         )}
 
+        {/* TAB: SYSTEM BENCHMARKS */}
+        {activeTab === "benchmark" && (
+          <section className="content-grid" style={{ display: "block" }}>
+            <BenchmarkTab apiBase="http://127.0.0.1:8000" />
+          </section>
+        )}
+
+        {/* TAB: PCAP REPLAYER & FLOW INSPECTOR */}
+        {activeTab === "pcap" && (
+          <section className="content-grid" style={{ display: "block" }}>
+            <PcapReplayerTab
+              apiBase="http://127.0.0.1:8000"
+              onOpenXAI={({ model, threatScore, eventData }) => {
+                setXaiModalConfig({
+                  isOpen: true,
+                  modelKey: model || "cicids",
+                  threatScore: threatScore || 0.92,
+                  eventData: eventData || null,
+                });
+              }}
+            />
+          </section>
+        )}
+
         {/* Executive / Incident Report Modal */}
         <ReportModal
           isOpen={isReportModalOpen}
           onClose={() => setIsReportModalOpen(false)}
+          apiBase="http://127.0.0.1:8000"
+        />
+
+        {/* Explainable AI (XAI) Modal */}
+        <XAIExplanationModal
+          isOpen={xaiModalConfig.isOpen}
+          onClose={() => setXaiModalConfig((prev) => ({ ...prev, isOpen: false }))}
+          modelKey={xaiModalConfig.modelKey}
+          threatScore={xaiModalConfig.threatScore}
+          eventData={xaiModalConfig.eventData}
           apiBase="http://127.0.0.1:8000"
         />
       </main>

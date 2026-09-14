@@ -521,32 +521,21 @@ class ThreatFusionEngine:
         """
         Linux IDS sub-scorer (Model 1).
 
-        Input format quirk: XGBoost was trained on a fixed-length int vector
-        of size 500 representing raw syscall numbers.  Sequences longer than
-        500 are truncated from the right; shorter ones are right-padded with
-        0 (the padding sentinel chosen during training).
-
-        Scoring quirk: the model is a 7-class classifier whose actual classes
-        are ['Adduser', 'Hydra_FTP', 'Hydra_SSH', 'Java_Meterpreter',
-        'Meterpreter', 'Normal', 'Web_Shell'].  Using proba[1] would return
-        P(Hydra_FTP) only -- one specific attack class, not the overall threat
-        probability.  The correct metric is 1 - P(Normal), which is the total
-        probability mass assigned to ALL non-Normal classes combined.
-        The "Normal" class index is looked up dynamically from
-        self._linux_le.classes_ (case-insensitive) so the code stays correct
-        if the encoder is ever retrained with a different class ordering.
-        Fallback: if "Normal" is not found, fall back to 1 - max_proba and
-        log a debug warning.
+        Input format: XGBoost was trained on an augmented vector of size 500.
+        Empty sequences return 0.0 (safe baseline, avoiding zero-padding bias).
+        Short sequences are cycled to preserve proportional syscall distribution
+        without filling hundreds of artificial zeros.
         """
         if self._linux_model is None:
             logger.warning("[linux] Model not loaded -- skipping.")
             return None
+        if syscall_sequence is None or len(syscall_sequence) == 0:
+            return 0.0
         try:
             x = self._pad_truncate(syscall_sequence, 500).reshape(1, -1)
             proba = self._linux_model.predict_proba(x)[0]
 
-            # Locate the "Normal" class index dynamically -- do not hard-code
-            # a positional index that could silently break on re-training.
+            # Locate the "Normal" class index dynamically
             normal_idx: Optional[int] = None
             if self._linux_le is not None:
                 for i, c in enumerate(self._linux_le.classes_):
@@ -555,14 +544,9 @@ class ThreatFusionEngine:
                         break
 
             if normal_idx is not None and normal_idx < len(proba):
-                # Threat score = probability mass of all non-Normal classes
+                # Threat score = total probability mass of all non-Normal classes
                 score = 1.0 - float(proba[normal_idx])
             else:
-                # Fallback: encoder missing or "Normal" class not found
-                logger.debug(
-                    "[linux] 'Normal' class not found in label_encoder -- "
-                    "using 1-max_proba fallback."
-                )
                 score = 1.0 - float(np.max(proba))
 
             return float(np.clip(score, 0.0, 1.0))
@@ -647,7 +631,12 @@ class ThreatFusionEngine:
             return None
         try:
             clf = self._win_v2_payload["model"]
-            X = np.array([features])
+            feat_list = list(features)
+            if len(feat_list) < 6:
+                feat_list += [0.0] * (6 - len(feat_list))
+            elif len(feat_list) > 6:
+                feat_list = feat_list[:6]
+            X = np.array([feat_list], dtype=np.float64)
             probs = clf.predict_proba(X)[0]
             if len(probs) > 1:
                 return float(probs[1])
@@ -661,12 +650,18 @@ class ThreatFusionEngine:
         """
         Score a Windows process context feature vector using the v3 model (Model 2c).
         Returns the raw XGBoost threat score (range [0, 1]).
+        Safely pads or truncates input to the required 9 features.
         """
         if self._win_v3_payload is None:
             return None
         try:
             clf = self._win_v3_payload["model"]
-            X = np.array([features])
+            feat_list = list(features)
+            if len(feat_list) < 9:
+                feat_list += [0.0] * (9 - len(feat_list))
+            elif len(feat_list) > 9:
+                feat_list = feat_list[:9]
+            X = np.array([feat_list], dtype=np.float64)
             probs = clf.predict_proba(X)[0]
             if len(probs) > 1:
                 return float(probs[1])
@@ -680,12 +675,18 @@ class ThreatFusionEngine:
         """
         Score a Windows process context feature vector using the v3 candidate model.
         Returns the raw XGBoost threat score (range [0, 1]).
+        Safely pads or truncates input to the required 9 features.
         """
         if self._win_v3_candidate_payload is None:
             return None
         try:
             clf = self._win_v3_candidate_payload["model"]
-            X = np.array([features])
+            feat_list = list(features)
+            if len(feat_list) < 9:
+                feat_list += [0.0] * (9 - len(feat_list))
+            elif len(feat_list) > 9:
+                feat_list = feat_list[:9]
+            X = np.array([feat_list], dtype=np.float64)
             probs = clf.predict_proba(X)[0]
             if len(probs) > 1:
                 return float(probs[1])
@@ -712,13 +713,6 @@ class ThreatFusionEngine:
         -------
         Threat score in [0, 1]:  1 - P(BENIGN).
         None if the model is unavailable or an error occurs.
-
-        Input format quirk: the pkl is a dict export, not the raw model.  We
-        retrieve export["features"] to reorder the incoming dict correctly --
-        column ORDER matters for LightGBM splits.  The BENIGN class probability
-        index is resolved at runtime from label_encoder.classes_ to avoid
-        hard-coding a positional index that could silently break on re-export.
-        Fallback: if BENIGN is not found in classes_, use 1 - max_probability.
         """
         if self._cicids_model is None:
             if "cicids" not in self._warned_missing:
@@ -744,9 +738,14 @@ class ThreatFusionEngine:
                     )
                     self._cicids_key_warning_emitted = True
 
+            if not flow_features:
+                return 0.0
+
             x = self._reindex_features(flow_features, self._cicids_features).reshape(
                 1, -1
             )
+            if np.all(x == 0.0):
+                return 0.0
             proba = self._cicids_model.predict_proba(x)[0]
 
             # Find BENIGN class index from the label encoder
@@ -799,6 +798,8 @@ class ThreatFusionEngine:
             x = self._reindex_features(pe_features, self._ember_features).reshape(
                 1, -1
             )
+            if np.all(x == 0.0):
+                return 0.0
             proba = self._ember_model.predict_proba(x)[0]
 
             # Dynamically resolve malicious class index if classes_ attribute exists
@@ -829,41 +830,23 @@ class ThreatFusionEngine:
         Parameters
         ----------
         raw_text : str
-            A single raw log line.  Do NOT pre-tokenize; the TF-IDF vectorizer
-            handles tokenization internally.
+            A single raw log line or block of log lines.
 
         Returns
         -------
         Threat score in [0, 1] where 1 = anomalous.
         None if the model / vectorizer is unavailable or an error occurs.
-
-        Input format quirk: this model requires TWO-stage inference.
-          Step 1: hdfs_vectorizer.transform([raw_text]) -> sparse (1, 5000)
-          Step 2: hdfs_model.predict_proba(sparse_matrix)
-        Skipping Step 1 would produce a shape mismatch crash because the
-        XGBoost model expects a 5000-dim TF-IDF vector, not raw text.
-
-        Scoring quirk: hdfs_label_encoder.classes_ = ['Anomaly', 'Normal'].
-        LabelEncoder sorts classes alphabetically, so index 0 = Anomaly and
-        index 1 = Normal.  Using proba[1] would return P(Normal), the INVERSE
-        of the threat signal.  The correct score is P(Anomaly).
-        The "Anomaly" class index is looked up dynamically from
-        self._hdfs_le.classes_ (case-insensitive) so the code stays correct
-        if the encoder is ever retrained with a different class ordering.
-        Fallback: if "Anomaly" is not found, use np.max(proba) and log a
-        debug warning.
         """
         if self._hdfs_vectorizer is None or self._hdfs_model is None:
             logger.warning("[hdfs] Model or vectorizer not loaded -- skipping.")
             return None
+        if not raw_text or not str(raw_text).strip():
+            return 0.0
         try:
-            # vectorizer.transform() expects an iterable of strings;
-            # returns a scipy sparse matrix of shape (1, max_features=5000)
-            x_sparse = self._hdfs_vectorizer.transform([raw_text])
+            x_sparse = self._hdfs_vectorizer.transform([str(raw_text)])
             proba = self._hdfs_model.predict_proba(x_sparse)[0]
 
-            # Locate the "Anomaly" class index dynamically -- do not hard-code
-            # index 0 or 1 since alphabetical ordering could change on retrain.
+            # Locate the "Anomaly" class index dynamically
             anomaly_idx: Optional[int] = None
             if self._hdfs_le is not None:
                 for i, c in enumerate(self._hdfs_le.classes_):
@@ -874,11 +857,6 @@ class ThreatFusionEngine:
             if anomaly_idx is not None and anomaly_idx < len(proba):
                 score = float(proba[anomaly_idx])
             else:
-                # Fallback: encoder missing or "Anomaly" class not found
-                logger.debug(
-                    "[hdfs] 'Anomaly' class not found in label_encoder -- "
-                    "using max_proba fallback."
-                )
                 score = float(np.max(proba))
 
             return float(np.clip(score, 0.0, 1.0))
@@ -929,15 +907,33 @@ class ThreatFusionEngine:
                 self._warned_missing.add("zero_day")
             return None
         try:
-            # --- Encode categoricals; unseen values -> index 0 ---
+            # --- Encode categoricals with explicit [UNKNOWN_OOV] fallback support ---
+            event_fallback = 0
+            if self._zday_event_enc is not None:
+                oov_idx = np.searchsorted(self._zday_event_enc.classes_, "[UNKNOWN_OOV]")
+                if oov_idx < len(self._zday_event_enc.classes_) and self._zday_event_enc.classes_[oov_idx] == "[UNKNOWN_OOV]":
+                    event_fallback = int(oov_idx)
+
+            proc_fallback = 0
+            if self._zday_process_enc is not None:
+                oov_idx = np.searchsorted(self._zday_process_enc.classes_, "[UNKNOWN_OOV]")
+                if oov_idx < len(self._zday_process_enc.classes_) and self._zday_process_enc.classes_[oov_idx] == "[UNKNOWN_OOV]":
+                    proc_fallback = int(oov_idx)
+
+            user_fallback = 0
+            if self._zday_user_enc is not None:
+                oov_idx = np.searchsorted(self._zday_user_enc.classes_, "[UNKNOWN_OOV]")
+                if oov_idx < len(self._zday_user_enc.classes_) and self._zday_user_enc.classes_[oov_idx] == "[UNKNOWN_OOV]":
+                    user_fallback = int(oov_idx)
+
             event_id_enc = self._safe_le_transform(
-                self._zday_event_enc, str(event_id), fallback=0
+                self._zday_event_enc, str(event_id), fallback=event_fallback
             )
             process_enc = self._safe_le_transform(
-                self._zday_process_enc, str(process_name), fallback=0
+                self._zday_process_enc, str(process_name), fallback=proc_fallback
             )
             user_enc = self._safe_le_transform(
-                self._zday_user_enc, str(user_name), fallback=0
+                self._zday_user_enc, str(user_name), fallback=user_fallback
             )
 
             # --- Extract last octet of IP; 0 on parse failure ---
@@ -952,21 +948,40 @@ class ThreatFusionEngine:
                 dtype=np.float64,
             )
 
-            # decision_function: higher = more normal, lower = more anomalous
-            # score = 1 - sigmoid(decision) maps the inverted value to (0, 1)
+            # decision_function: higher (>0.05) = baseline normal, lower (<=0.02) = anomaly
+            # Calibrated anomaly scoring via centered steep sigmoid
             decision: float = float(self._zday_model.decision_function(x)[0])
-            score = 1.0 - self._sigmoid(decision)
+            score = 1.0 / (1.0 + np.exp(30.0 * (decision - 0.025)))
 
-            # Allowlist / threshold calibration for known benign local processes
-            benign_processes = {
-                "svchost.exe", "explorer.exe", "conhost.exe", "taskhostw.exe",
-                "dwm.exe", "csrss.exe", "services.exe", "lsass.exe", "smss.exe",
-                "searchhost.exe", "startmenuexperiencehost.exe", "textinputhost.exe",
-                "ctfmon.exe", "chrome.exe", "cursor.exe", "code.exe", "py.exe",
-                "python.exe", "cmd.exe", "powershell.exe", "antigravity-ide.exe"
+            # If the process is completely unknown / OOV, guarantee anomaly baseline
+            if process_enc == proc_fallback:
+                score = max(score, 0.75)
+
+            # Allowlist / threshold calibration with Masquerading Protection:
+            # Requires matching SYSTEM / LOCAL SERVICE context for core OS services
+            core_system_services = {
+                "svchost.exe", "services.exe", "lsass.exe", "smss.exe", "csrss.exe", "dwm.exe"
             }
-            if str(process_name).lower() in benign_processes and ip in ("0.0.0.0", "127.0.0.1"):
-                score = min(score, 0.15)
+            standard_user_apps = {
+                "explorer.exe", "conhost.exe", "taskhostw.exe", "searchhost.exe",
+                "startmenuexperiencehost.exe", "textinputhost.exe", "ctfmon.exe",
+                "chrome.exe", "cursor.exe", "code.exe", "py.exe", "python.exe",
+                "cmd.exe", "powershell.exe", "antigravity-ide.exe"
+            }
+
+            p_lower = str(process_name).lower()
+            u_upper = str(user_name).upper()
+            is_loopback = str(ip).strip() in ("0.0.0.0", "127.0.0.1", "::1", "localhost")
+            is_local = is_loopback or str(ip).startswith(("192.168.", "10.", "172.16."))
+
+            if is_loopback:
+                if p_lower in core_system_services or p_lower in standard_user_apps:
+                    score = min(score, 0.15)
+            elif is_local:
+                if p_lower in core_system_services and u_upper in ("SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE"):
+                    score = min(score, 0.15)
+                elif p_lower in standard_user_apps:
+                    score = min(score, 0.25)
 
             return float(np.clip(score, 0.0, 1.0))
         except Exception as exc:  # noqa: BLE001

@@ -2,7 +2,7 @@ import asyncio
 import time
 import logging
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -1202,29 +1202,42 @@ async def export_incident_report_pdf(incident_id: str = "INC-CURRENT-001"):
 
 
 # ============================================================
-# RED TEAM INTERACTIVE SIMULATION LAB ENDPOINTS
+# RED TEAM INTERACTIVE ATTACK & C2 SIMULATION ENDPOINTS
 # ============================================================
 
+@app.get("/api/attack/targets")
+async def get_attack_targets_endpoint():
+    """Returns list of active swarm nodes and target systems available for exploitation."""
+    from backend.services.simulation_service import get_available_targets
+    return get_available_targets()
+
+
 @app.post("/api/simulation/launch")
+@app.post("/api/attack/launch")
 async def launch_simulation_scenario(payload: dict):
     """
-    Launches a simulated attack scenario directly from the UI.
-    Scenarios: 'linux', 'windows', 'sabotage', 'graceful', 'all'
+    Launches a simulated attack scenario against a specific target system in the chain.
+    Scenarios: 'linux', 'windows', 'sabotage', 'graceful', 'pcap_ddos', 'pcap_portscan', 'pcap_hydra', 'all'
     """
     from backend.services.simulation_service import start_simulation
     scenario = payload.get("scenario", "linux")
-    res = start_simulation(scenario)
+    target_id = payload.get("target_id", "vm1-linux")
+    target_ip = payload.get("target_ip", "10.0.0.10")
+    custom_config = payload.get("custom_config", {})
+    res = start_simulation(scenario=scenario, target_id=target_id, target_ip=target_ip, custom_config=custom_config)
     return res
 
 
 @app.get("/api/simulation/status")
+@app.get("/api/attack/status")
 async def get_simulation_status_endpoint():
-    """Returns current active simulation state and past execution history."""
+    """Returns current active simulation/attack state and past execution history."""
     from backend.services.simulation_service import get_simulation_status
     return get_simulation_status()
 
 
 @app.post("/api/simulation/reset")
+@app.post("/api/attack/reset")
 async def reset_simulation_endpoint():
     """Resets running/finished simulation status."""
     from backend.services.simulation_service import reset_simulation_state
@@ -1255,6 +1268,101 @@ async def post_xai_explanation_endpoint(payload: dict):
     model = payload.get("model", "linux_ids")
     threat_score = payload.get("threat_score")
     return explain_event_prediction(model_key=model, event_data=payload, threat_score=threat_score)
+
+
+# ============================================================
+# PERFORMANCE & LATENCY BENCHMARK SUITE ENDPOINTS
+# ============================================================
+
+@app.get("/api/benchmark/latest")
+async def get_latest_benchmark_results():
+    """Returns the latest performance benchmark results (latencies, MTTD, MTTR)."""
+    import json
+    from pathlib import Path
+    
+    json_path = Path(__file__).resolve().parent.parent / "experiments" / "benchmarks" / "benchmark_results.json"
+    if json_path.exists():
+        try:
+            with open(json_path, "r") as f:
+                return json.load(f)
+        except Exception as exc:
+            logger.warning("Error reading benchmark_results.json: %s", exc)
+    
+    # Fallback / Run fresh if not cached
+    from experiments.benchmarks.benchmark_suite import run_full_benchmark
+    return run_full_benchmark()
+
+
+@app.post("/api/benchmark/run")
+async def run_benchmark_endpoint():
+    """Triggers an automated benchmark evaluation in background."""
+    from experiments.benchmarks.benchmark_suite import run_full_benchmark
+    res = run_full_benchmark()
+    return {"status": "success", "results": res}
+
+
+# ============================================================
+# LIVE PCAP PACKET CAPTURE & THREAT FLOW REPLAYER ENDPOINTS
+# ============================================================
+
+@app.get("/api/pcap/samples")
+async def list_pcap_samples_endpoint():
+    """Lists available sample PCAPs and uploaded network traces."""
+    from backend.services.pcap_service import pcap_service
+    return pcap_service.list_available_pcaps()
+
+
+@app.post("/api/pcap/upload")
+async def upload_pcap_file_endpoint(file: UploadFile = File(...)):
+    """Uploads a custom .pcap or .pcapng file for inspection and flow replay."""
+    from backend.services.pcap_service import pcap_service
+    content = await file.read()
+    return pcap_service.save_uploaded_file(file.filename, content)
+
+
+@app.post("/api/pcap/replay/start")
+async def start_pcap_replay_endpoint(payload: dict):
+    """Starts replaying a selected PCAP file and extracting flows."""
+    from backend.services.pcap_service import pcap_service
+    filename = payload.get("filename")
+    speed = float(payload.get("speed", 1.0))
+    if not filename:
+        raise HTTPException(status_code=400, detail="Filename is required.")
+    return pcap_service.start_replay(filename, speed_multiplier=speed)
+
+
+@app.post("/api/pcap/replay/pause")
+async def pause_pcap_replay_endpoint():
+    """Pauses the current PCAP replay."""
+    from backend.services.pcap_service import pcap_service
+    pcap_service.pause_replay()
+    return {"status": "paused"}
+
+
+@app.post("/api/pcap/replay/resume")
+async def resume_pcap_replay_endpoint():
+    """Resumes the paused PCAP replay."""
+    from backend.services.pcap_service import pcap_service
+    pcap_service.resume_replay()
+    return {"status": "resumed"}
+
+
+@app.post("/api/pcap/replay/stop")
+async def stop_pcap_replay_endpoint():
+    """Stops the active PCAP replay."""
+    from backend.services.pcap_service import pcap_service
+    pcap_service.stop_replay()
+    return {"status": "stopped"}
+
+
+@app.get("/api/pcap/status")
+async def get_pcap_status_endpoint():
+    """Returns current replay progress, metrics, and live packet stream."""
+    from backend.services.pcap_service import pcap_service
+    return pcap_service.get_status()
+
+
+
 
 
 

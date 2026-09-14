@@ -92,7 +92,27 @@ services:
     networks:
       - aegis-network
     ports:
-      - "5173:80"     # Accessible at http://localhost:5173
+      - "5173:80"     # Accessible at http://localhost:5173 (SOC Defender)
+    depends_on:
+      command-node:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # ATTACKER C2 DASHBOARD — Standalone Red Team Attack Operations Console
+  # ---------------------------------------------------------------------------
+  attacker-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.attacker
+      args:
+        VITE_COMMAND_NODE_URL: http://localhost:8000
+    container_name: aegis-attacker-dashboard
+    hostname: attacker-dashboard
+    networks:
+      - aegis-network
+    ports:
+      - "5174:80"     # Accessible at http://localhost:5174 (Red Team C2)
     depends_on:
       command-node:
         condition: service_healthy

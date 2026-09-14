@@ -1,0 +1,98 @@
+{
+  "timestamp": "2026-09-13 17:54:24 UTC",
+  "epoch": 1789322064.911135,
+  "models": {
+    "linux_ids": {
+      "label": "Linux Syscall Bi-LSTM / Anomaly",
+      "mean_ms": 1.163,
+      "p50_ms": 1.1541,
+      "p95_ms": 1.4294,
+      "p99_ms": 1.7119,
+      "throughput_eps": 859.9,
+      "iterations": 500
+    },
+    "ember": {
+      "label": "EMBER Windows PE Classifier",
+      "mean_ms": 0.0021,
+      "p50_ms": 0.002,
+      "p95_ms": 0.0024,
+      "p99_ms": 0.0029,
+      "throughput_eps": 483980.3,
+      "iterations": 500
+    },
+    "cicids": {
+      "label": "CICIDS Network Flow Classifier",
+      "mean_ms": 4.2696,
+      "p50_ms": 4.2182,
+      "p95_ms": 5.3462,
+      "p99_ms": 6.075,
+      "throughput_eps": 234.2,
+      "iterations": 500
+    },
+    "windows_advanced": {
+      "label": "Windows Behavior & Ransomware",
+      "mean_ms": 0.1087,
+      "p50_ms": 0.0886,
+      "p95_ms": 0.1453,
+      "p99_ms": 0.3547,
+      "throughput_eps": 9196.5,
+      "iterations": 500
+    },
+    "hdfs": {
+      "label": "HDFS Distributed Log Parser",
+      "mean_ms": 1.7738,
+      "p50_ms": 1.7684,
+      "p95_ms": 2.0972,
+      "p99_ms": 2.3529,
+      "throughput_eps": 563.8,
+      "iterations": 500
+    },
+    "zero_day": {
+      "label": "Zero-Day Autoencoder Manifold",
+      "mean_ms": 0.0041,
+      "p50_ms": 0.0041,
+      "p95_ms": 0.0045,
+      "p99_ms": 0.0049,
+      "throughput_eps": 245374.7,
+      "iterations": 500
+    }
+  },
+  "fusion": {
+    "mean_ms": 0.0375,
+    "p50_ms": 0.0408,
+    "p95_ms": 0.053,
+    "p99_ms": 0.0752,
+    "throughput_eps": 26641.0,
+    "iterations": 1000
+  },
+  "consensus": {
+    "mean_ms": 0.6085,
+    "p50_ms": 0.5675,
+    "p95_ms": 0.7779,
+    "p99_ms": 1.1929,
+    "throughput_eps": 1643.4,
+    "iterations": 500
+  },
+  "e2e": {
+    "mttd": {
+      "mean_ms": 0.0698,
+      "p50_ms": 0.0691,
+      "p95_ms": 0.0938,
+      "p99_ms": 0.1332
+    },
+    "mttr": {
+      "mean_ms": 0.6859,
+      "p50_ms": 0.688,
+      "p95_ms": 0.9039,
+      "p99_ms": 1.1914
+    },
+    "iterations": 300
+  },
+  "overall_kpis": {
+    "mean_mttd_ms": 0.0698,
+    "mean_mttr_ms": 0.6859,
+    "consensus_latency_ms": 0.6085,
+    "peak_throughput_eps": 26641.0,
+    "total_benchmark_samples": 4800
+  }
+}

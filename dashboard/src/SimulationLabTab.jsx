@@ -210,8 +210,30 @@ export default function SimulationLabTab({ apiBase, wsData }) {
           </p>
         </div>
 
-        {/* Master Run All Button */}
-        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+        {/* Master Run All & Attacker C2 Link */}
+        <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+          <a
+            href="http://localhost:5174"
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              background: "rgba(239, 68, 68, 0.2)",
+              border: "1px solid rgba(239, 68, 68, 0.6)",
+              color: "#fca5a5",
+              borderRadius: "8px",
+              padding: "10px 16px",
+              fontWeight: "700",
+              fontSize: "0.85rem",
+              textDecoration: "none",
+            }}
+          >
+            <Skull size={16} color="#ef4444" />
+            Open Standalone Attacker C2 (Port 5174) &rarr;
+          </a>
+
           <button
             onClick={() => launchScenario("all")}
             disabled={simState.is_running}

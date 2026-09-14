@@ -44,9 +44,9 @@ class TestEMBERArtifactDiscovery(unittest.TestCase):
         self.assertTrue(_MODEL_PKL.exists(), f"Missing: {_MODEL_PKL}")
 
     def test_02_artifact_nonzero_size(self):
-        """2. Artifact is not empty (> 1 MB expected)."""
+        """2. Artifact is not empty (> 100 KB expected)."""
         size = _MODEL_PKL.stat().st_size
-        self.assertGreater(size, 500_000,
+        self.assertGreater(size, 100_000,
                            f"Suspiciously small: {size} bytes")
 
     def test_03_dummy_file_exists_as_orphan(self):

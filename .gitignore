@@ -7,6 +7,9 @@ agent/telemetry_output/
 node_modules/
 dashboard/node_modules/
 dashboard/dist/
+attack_dashboard/dist/
+dist/agent_packages/*.tar.gz
+dist/agent_packages/*.zip
 # Environment — contains DB credentials, never commit
 .env
 # Docker env (contains real credentials if customized — keep template only)
