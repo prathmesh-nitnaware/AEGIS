@@ -89,9 +89,10 @@ if DATABASE_URL.startswith("postgresql"):
     if "sslmode=require" in DATABASE_URL and "ssl=require" not in DATABASE_URL:
         DATABASE_URL = DATABASE_URL.replace("sslmode=require", "ssl=require")
     # strip channel_binding parameter — asyncpg doesn't understand it
-    if "channel_binding=require" in DATABASE_URL:
-        DATABASE_URL = DATABASE_URL.replace("&channel_binding=require", "").replace("?channel_binding=require", "")
-    _connect_args = {"ssl": "require"}
+    if "ssl=require" in DATABASE_URL:
+        _connect_args = {"ssl": "require"}
+    else:
+        _connect_args = {}
 
 import sys
 from sqlalchemy.pool import NullPool

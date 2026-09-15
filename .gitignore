@@ -7,9 +7,18 @@ agent/telemetry_output/
 node_modules/
 dashboard/node_modules/
 dashboard/dist/
+attack_dashboard/node_modules/
 attack_dashboard/dist/
 dist/agent_packages/*.tar.gz
 dist/agent_packages/*.zip
+dist/agent_packages/*.sha256
+dist/
+logs/
+aegis_audit.log
+*.log
+.pytest_cache/
+.aegis_quarantine/
+*.quarantine
 # Environment — contains DB credentials, never commit
 .env
 # Docker env (contains real credentials if customized — keep template only)

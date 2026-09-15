@@ -1362,8 +1362,215 @@ async def get_pcap_status_endpoint():
     return pcap_service.get_status()
 
 
+# ============================================================
+# ENTERPRISE SIEM & SOC ALERT DISPATCHER ENDPOINTS
+# ============================================================
+
+@app.get("/api/alerts/config")
+async def get_alert_config_endpoint():
+    """Returns configured SIEM forwarding and webhook destinations."""
+    from backend.services.alert_dispatcher import default_alert_dispatcher
+    return {
+        "min_severity": default_alert_dispatcher.min_severity,
+        "destinations": default_alert_dispatcher.destinations,
+        "history": default_alert_dispatcher.dispatch_history[-20:],
+    }
 
 
+@app.post("/api/alerts/config")
+async def set_alert_config_endpoint(payload: dict):
+    """Configures a SIEM forwarder or webhook alert destination."""
+    from backend.services.alert_dispatcher import default_alert_dispatcher
+    name = payload.get("name")
+    dest_type = payload.get("type")
+    config = payload.get("config", {})
+    enabled = payload.get("enabled", True)
+    if not name or not dest_type:
+        raise HTTPException(status_code=400, detail="Missing name or type in alert config.")
+    default_alert_dispatcher.configure_destination(name, dest_type, config, enabled=enabled)
+    if "min_severity" in payload:
+        default_alert_dispatcher.min_severity = payload["min_severity"]
+    return {"status": "configured", "destination": name}
+
+
+@app.post("/api/alerts/dispatch-test")
+async def dispatch_test_alert_endpoint(payload: dict = None):
+    """Dispatches a test alert payload to all active SIEM/webhook destinations."""
+    from backend.services.alert_dispatcher import default_alert_dispatcher, AlertPayload
+    payload = payload or {}
+    alert = AlertPayload(
+        alert_id=payload.get("alert_id", f"TEST-ALERT-{int(time.time())}"),
+        event_type=payload.get("event_type", "ransomware_simulation"),
+        threat_score=float(payload.get("threat_score", 0.985)),
+        confidence=float(payload.get("confidence", 0.99)),
+        severity=payload.get("severity", "CRITICAL"),
+        origin_agent_id=payload.get("origin_agent_id", "vm1-linux"),
+        target_ip=payload.get("target_ip", "172.30.0.21"),
+        source_ip=payload.get("source_ip", "10.0.0.99"),
+        details=payload.get("details", {"process": "vssadmin.exe", "action": "delete shadows /all"}),
+        mitre_tactics=["Impact (TA0040)", "Inhibit System Recovery (T1490)"],
+        mitigation_action="KILL_PROCESS_AND_ISOLATE",
+        consensus_peers=3,
+        total_peer_weight=3.5,
+    )
+    results = default_alert_dispatcher.dispatch(alert)
+    return {
+        "status": "dispatched",
+        "alert": alert.to_dict(),
+        "delivery_results": results,
+    }
+
+
+# ============================================================
+# AUTOMATED RED VS. BLUE LIVE BATTLE CAMPAIGN ENDPOINTS
+# ============================================================
+
+@app.post("/api/battle/start")
+async def start_battle_campaign_endpoint(payload: dict = None):
+    """Starts the 5-phase automated adversary kill-chain vs autonomous defender battle."""
+    from backend.services.battle_orchestrator import default_battle_orchestrator
+    payload = payload or {}
+    target = payload.get("target_agent_id", "vm1-linux")
+    target_ip = payload.get("target_ip", "172.30.0.21")
+    step_delay = float(payload.get("step_delay", 1.0))
+    success = default_battle_orchestrator.start_battle(
+        target_agent_id=target,
+        target_ip=target_ip,
+        step_delay=step_delay,
+        async_run=True,
+    )
+    if not success:
+        raise HTTPException(status_code=409, detail="A battle campaign is already actively running.")
+    return {"status": "started", "target": target, "target_ip": target_ip}
+
+
+@app.get("/api/battle/status")
+async def get_battle_status_endpoint():
+    """Returns real-time battle state, logs, phase progression, and defender KPIs."""
+    from backend.services.battle_orchestrator import default_battle_orchestrator
+    return default_battle_orchestrator.get_state()
+
+
+@app.post("/api/battle/stop")
+async def stop_battle_campaign_endpoint():
+    """Aborts the active live battle campaign."""
+    from backend.services.battle_orchestrator import default_battle_orchestrator
+    default_battle_orchestrator.stop_battle()
+    return {"status": "stopped"}
+
+
+# ============================================================
+# CENTRALIZED FLEET MANAGEMENT & SECURE AUTO-UPDATE ENDPOINTS
+# ============================================================
+
+@app.get("/api/fleet/inventory")
+async def list_fleet_inventory_endpoint():
+    """Returns active agent inventory, version, and custom configurations."""
+    from backend.services.update_service import fleet_update_service
+    return {"agents": fleet_update_service.list_fleet()}
+
+
+@app.get("/api/fleet/config/{agent_id}")
+async def get_fleet_agent_config_endpoint(agent_id: str):
+    """Retrieves custom configuration assigned to a specific agent."""
+    from backend.services.update_service import fleet_update_service
+    return {"agent_id": agent_id, "config": fleet_update_service.get_agent_config(agent_id)}
+
+
+@app.post("/api/fleet/config/push")
+async def push_fleet_config_endpoint(payload: dict):
+    """Pushes dynamic configuration patch to target agent or fleet-wide."""
+    from backend.services.update_service import fleet_update_service
+    agent_id = payload.get("agent_id", "agent-local")
+    config_patch = payload.get("config", {})
+    if not config_patch:
+        raise HTTPException(status_code=400, detail="Missing 'config' dictionary in payload.")
+    res = fleet_update_service.push_agent_config(agent_id, config_patch)
+    return res
+
+
+@app.post("/api/fleet/packages/sign")
+async def sign_fleet_package_endpoint(payload: dict):
+    """Signs an agent distribution archive (.tar.gz / .zip) with Ed25519 private key."""
+    from backend.services.update_service import fleet_update_service
+    pkg_path = payload.get("package_path")
+    if not pkg_path:
+        raise HTTPException(status_code=400, detail="Missing package_path.")
+    try:
+        return fleet_update_service.sign_package(pkg_path)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/fleet/packages/verify")
+async def verify_fleet_package_endpoint(payload: dict):
+    """Verifies Ed25519 signature and SHA-256 integrity on an agent package."""
+    from backend.services.update_service import fleet_update_service
+    pkg_path = payload.get("package_path")
+    sig_b64 = payload.get("signature_b64")
+    expected_sha256 = payload.get("expected_sha256")
+    public_key_b64 = payload.get("public_key_b64")
+
+    if not pkg_path or not sig_b64:
+        raise HTTPException(status_code=400, detail="Missing package_path or signature_b64.")
+
+    res = fleet_update_service.verify_package(
+        package_path=pkg_path,
+        signature_b64=sig_b64,
+        expected_sha256=expected_sha256,
+        public_key_b64=public_key_b64,
+    )
+    return res
+
+
+# ============================================================
+# MITRE ATT&CK COVERAGE & ISO/NIST COMPLIANCE ENDPOINTS
+# ============================================================
+
+@app.get("/api/compliance/mitre-matrix")
+async def get_mitre_coverage_matrix_endpoint():
+    """Returns MITRE ATT&CK coverage statistics and tested vs protected breakdown."""
+    from backend.services.mitre_coverage_service import mitre_coverage_service
+    return mitre_coverage_service.get_coverage_summary()
+
+
+@app.get("/api/compliance/mitre-heatmap.svg")
+async def get_mitre_heatmap_svg_endpoint():
+    """Returns dynamic vector SVG heatmap for MITRE ATT&CK Enterprise Matrix."""
+    from backend.services.mitre_coverage_service import mitre_coverage_service
+    svg_content = mitre_coverage_service.render_svg_heatmap()
+    return Response(content=svg_content, media_type="image/svg+xml")
+
+
+@app.get("/api/compliance/iso27001-nist")
+async def get_iso_nist_compliance_endpoint(
+    mttd_ms: float = 4.2, mttr_ms: float = 12.8, containment_rate: float = 99.4
+):
+    """Returns structured ISO/IEC 27001 and NIST CSF 2.0 control audit posture."""
+    from backend.services.compliance_report_service import compliance_report_service
+    return compliance_report_service.get_compliance_posture(
+        mttd_ms=mttd_ms, mttr_ms=mttr_ms, containment_rate_pct=containment_rate
+    )
+
+
+@app.get("/api/compliance/export-pdf")
+@app.post("/api/compliance/export-pdf")
+async def export_compliance_report_pdf_endpoint(payload: dict = None):
+    """Generates and downloads publication-ready ISO 27001 & NIST CSF Compliance PDF Report."""
+    from backend.services.compliance_report_service import compliance_report_service
+    payload = payload or {}
+    mttd = float(payload.get("mttd_ms", 4.2))
+    mttr = float(payload.get("mttr_ms", 12.8))
+    rate = float(payload.get("containment_rate_pct", 99.4))
+
+    pdf_bytes = compliance_report_service.generate_compliance_pdf(
+        mttd_ms=mttd, mttr_ms=mttr, containment_rate_pct=rate
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=AEGIS_ISO27001_NIST_Compliance_Report.pdf"},
+    )
 
 
 if __name__ == "__main__":

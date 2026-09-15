@@ -43,13 +43,43 @@ volumes:
   aegis-quarantine:
   # Audit log persistence across container restarts
   aegis-audit-logs:
-  # SQLite fallback if NeonDB is not configured
+  # SQLite fallback if PostgreSQL is not configured
   aegis-db:
+  # Dedicated PostgreSQL persistent database volume
+  aegis-postgres-data:
 
 # ---------------------------------------------------------------------------
-# COMMAND NODE — FastAPI backend, WebSocket broadcaster, consensus coordinator
+# SERVICES
 # ---------------------------------------------------------------------------
 services:
+  # ---------------------------------------------------------------------------
+  # DATABASE — Local PostgreSQL container with healthchecks and persistence
+  # ---------------------------------------------------------------------------
+  aegis-db:
+    image: postgres:15-alpine
+    container_name: aegis-db
+    hostname: aegis-db
+    networks:
+      aegis-network:
+        ipv4_address: 172.30.0.5
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aegis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aegis_secure_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-aegis}
+    volumes:
+      - aegis-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegis -d aegis"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # COMMAND NODE — FastAPI backend, WebSocket broadcaster, consensus coordinator
+  # ---------------------------------------------------------------------------
   command-node:
     build:
       context: .
