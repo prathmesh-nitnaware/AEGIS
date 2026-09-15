@@ -90,7 +90,8 @@ $taskName = "AEGIS-EDR-Agent"
 # Remove existing task if present
 Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 
-$action = New-ScheduledTaskAction -Execute $venvPython -Argument "-m agent.daemon_service start --config `"$configFile`"" -WorkingDirectory $InstallDir
+$taskArgs = "-m agent.daemon_service start --config '$configFile'"
+$action = New-ScheduledTaskAction -Execute $venvPython -Argument $taskArgs -WorkingDirectory $InstallDir
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0 -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)

@@ -17,6 +17,7 @@ import time
 import requests
 import json
 import os
+import socket
 import sys
 from pathlib import Path
 
@@ -25,7 +26,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 COMMAND_NODE_URL = os.getenv("COMMAND_NODE_URL", "http://localhost:8000").rstrip("/")
-AGENT_ID = os.getenv("AGENT_ID", "endpoint-windows")
+AGENT_ID = os.getenv("AGENT_ID", socket.gethostname().lower())
 
 
 def run_simulation():
