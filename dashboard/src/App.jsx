@@ -30,6 +30,10 @@ import {
   Swords,
   Sliders,
   Award,
+  Globe,
+  Lock,
+  Key,
+  UserCheck,
 } from "lucide-react";
 import {
   AreaChart,
@@ -51,6 +55,12 @@ import BattleArenaTab from "./BattleArenaTab";
 import KernelCollectorsTab from "./KernelCollectorsTab";
 import FleetManagementTab from "./FleetManagementTab";
 import ComplianceAuditTab from "./ComplianceAuditTab";
+import RulesEngineTab from "./RulesEngineTab";
+import HardwareProfilingTab from "./HardwareProfilingTab";
+import CopilotAdvisorTab from "./CopilotAdvisorTab";
+import ThreatIntelTab from "./ThreatIntelTab";
+import RbacAuthTab from "./RbacAuthTab";
+
 
 /* ═══════════════════════════════════════════════
    Comprehensive Syscall Mapping Dictionary
@@ -770,6 +780,46 @@ export default function App() {
           </button>
 
           <button
+            className={`nav-item ${activeTab === "rules_engine" ? "active" : ""}`}
+            onClick={() => setActiveTab("rules_engine")}
+          >
+            <Shield size={16} />
+            Sigma &amp; YARA Rules
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === "hardware_profiling" ? "active" : ""}`}
+            onClick={() => setActiveTab("hardware_profiling")}
+          >
+            <Activity size={16} />
+            Hardware &amp; Flamegraph
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === "copilot_advisor" ? "active" : ""}`}
+            onClick={() => setActiveTab("copilot_advisor")}
+          >
+            <BrainCircuit size={16} />
+            AI Copilot &amp; Playbooks
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === "threat_intel" ? "active" : ""}`}
+            onClick={() => setActiveTab("threat_intel")}
+          >
+            <Globe size={16} />
+            Threat Intel (STIX/TAXII)
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === "rbac_auth" ? "active" : ""}`}
+            onClick={() => setActiveTab("rbac_auth")}
+          >
+            <Lock size={16} />
+            SOC RBAC &amp; Access Control
+          </button>
+
+          <button
             className={`nav-item ${activeTab === "compliance_tab" ? "active" : ""}`}
             onClick={() => setActiveTab("compliance_tab")}
           >
@@ -777,6 +827,7 @@ export default function App() {
             Compliance &amp; Audit PDF
           </button>
         </nav>
+
 
         <div className="agent-status-card">
           <div className={`status-indicator ${wsStatus.toLowerCase()}`} />
@@ -1454,7 +1505,7 @@ export default function App() {
                     type="text"
                     value={maintForm.agent_id}
                     onChange={(e) => setMaintForm({ ...maintForm, agent_id: e.target.value })}
-                    placeholder="vm1, vm2 or * for all"
+                    placeholder="node-1, node-2 or * for all"
                     required
                   />
                 </div>
@@ -1864,6 +1915,42 @@ export default function App() {
             <ComplianceAuditTab />
           </section>
         )}
+
+        {/* TAB: SIGMA & YARA RULES ENGINE */}
+        {activeTab === "rules_engine" && (
+          <section className="content-grid" style={{ display: "block" }}>
+            <RulesEngineTab />
+          </section>
+        )}
+
+        {/* TAB: HARDWARE PROFILING & FLAMEGRAPH */}
+        {activeTab === "hardware_profiling" && (
+          <section className="content-grid" style={{ display: "block" }}>
+            <HardwareProfilingTab />
+          </section>
+        )}
+
+        {/* TAB: AI INCIDENT INVESTIGATION COPILOT */}
+        {activeTab === "copilot_advisor" && (
+          <section className="content-grid" style={{ display: "block" }}>
+            <CopilotAdvisorTab />
+          </section>
+        )}
+
+        {/* TAB: STIX 2.1 / TAXII & MISP THREAT INTEL */}
+        {activeTab === "threat_intel" && (
+          <section className="content-grid" style={{ display: "block" }}>
+            <ThreatIntelTab />
+          </section>
+        )}
+
+        {/* TAB: ENTERPRISE RBAC & AUTH CLEARANCE */}
+        {activeTab === "rbac_auth" && (
+          <section className="content-grid" style={{ display: "block" }}>
+            <RbacAuthTab />
+          </section>
+        )}
+
 
         {/* Executive / Incident Report Modal */}
         <ReportModal

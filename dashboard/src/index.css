@@ -1,16 +1,19 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@500;600;700;800;900&display=swap');
+
 /* ─── AEGIS Design System ─── */
 
 :root {
   /* Palette */
-  --bg-base: #070b12;
-  --bg-surface: #0b1019;
-  --bg-elevated: #0e1622;
-  --bg-hover: #111827;
-  --bg-glass: rgba(11, 16, 25, 0.75);
+  --bg-base: #06090e;
+  --bg-surface: #0b111b;
+  --bg-elevated: #0f1726;
+  --bg-hover: #141f33;
+  --bg-glass: rgba(11, 17, 27, 0.78);
 
-  --border-default: #1c2533;
-  --border-subtle: #151e2a;
-  --border-accent: #26364e;
+  --border-default: #1c2738;
+  --border-subtle: #131c2b;
+  --border-accent: #273952;
+  --border-glow: rgba(56, 189, 248, 0.25);
 
   --text-primary: #e5e7eb;
   --text-secondary: #94a3b8;

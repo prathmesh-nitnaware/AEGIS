@@ -4,12 +4,15 @@
 - **Layer 1 — EDR Agent (Models, Fusion, Collectors, Heartbeat, Confidence & Trust Engine):** 50 / 50 items complete (100.0%)
 - **Kernel-Level Real-Time Telemetry Collectors (eBPF & ETW):** 4 / 4 items complete (100.0%) — *Linux eBPF tracepoints (< 1.5% CPU), Windows ETW (Events 1, 3, 6)*
 - **Layer 2 — Peer Voting Protocol:** 4 / 4 items complete (100.0%) — *Phase 2 Complete*
-- **Layer 3 — Command Node + Dual Dashboard:** 8 / 8 items complete (100.0%) — *Centralized Telemetry, Voting Hub, Active Response & Maintenance Portal Complete*
+- **Layer 3 — Command Node + Dual Dashboard (15 SOC Panes):** 11 / 11 items complete (100.0%) — *Centralized Telemetry, Voting Hub, Active Response, Rules Studio, Hardware Flamegraph & AI Copilot*
 - **Centralized Fleet Management & Secure Auto-Update:** 4 / 4 items complete (100.0%) — *Dynamic remote config push & Ed25519 cryptographic package verification*
 - **Compliance & SOC Reporting Enhancements:** 4 / 4 items complete (100.0%) — *MITRE ATT&CK SVG heatmaps & ISO 27001 / NIST CSF compliance PDF reports*
 - **⚡ GitHub Actions CI/CD Pipeline Automation:** 5 / 5 items complete (100.0%) — *Linux/Windows test matrices, ruff/flake8 lint, Ed25519 package verification, Vite frontends, Docker builds*
-- **🛡️ YARA / Sigma Rule Ingestion Engine:** 4 / 4 items complete (100.0%) — *Sigma YAML translator with eBPF/ETW query compilation, In-memory YARA scanner with wildcard hex matching*
-- **📈 High-Throughput Stress Testing & Hardware Profiling:** 3 / 3 items complete (100.0%) — *50,000+ ev/s synthetic stress harness, CPU flamegraph generator (12.3x eBPF efficiency gain)*
+- **🛡️ YARA / Sigma Rule Ingestion & Studio UI:** 5 / 5 items complete (100.0%) — *Sigma YAML translator, In-memory YARA scanner, and interactive SOC Rule Studio tab*
+- **📈 High-Throughput Stress Testing & Hardware Profiling UI:** 4 / 4 items complete (100.0%) — *50,000+ ev/s synthetic stress harness, CPU flamegraph generator & interactive dashboard pane*
+- **🤖 GenAI Incident Investigation Copilot & Remediation Playbooks:** 4 / 4 items complete (100.0%) — *LLM root-cause synthesis, MITRE attribution, and automated Bash/PowerShell playbooks*
+- **🌐 STIX 2.1 / TAXII & MISP Threat Intelligence Ingestion:** 4 / 4 items complete (100.0%) — *Real-time IOC memory matching (IPs, subnets, domains, hashes)*
+- **🔐 SOC Role-Based Access Control (RBAC) & Swarm Agent Auth:** 4 / 4 items complete (100.0%) — *JWT bearer tokens with role capability hierarchy (Admin/Analyst/Auditor) & mTLS agent keys*
 - **Phase A — NeonDB / PostgreSQL Persistence Layer:** 9 / 9 items complete (100.0%) — *All tables created, async write paths wired*
 - **Phase B — Response Driver Hardening:** 2 / 2 items complete (100.0%) — *Real firewall commands, real unisolate*
 - **Phase C — Trust Feedback Loop:** 3 / 3 items complete (100.0%) — *POST /api/trust/feedback wired*
@@ -18,8 +21,10 @@
 - **Turnkey Production Containerization:** 4 / 4 items complete (100.0%) — *PostgreSQL, FastAPI backend, SOC Defender UI, Red C2 console, Swarm agents, deploy_stack scripts*
 - **Enterprise SIEM & SOC Alert Forwarding:** 5 / 5 items complete (100.0%) — *Syslog RFC 5424/3164, CEF, Slack, Teams, Discord, PagerDuty, Splunk HEC, Elasticsearch*
 - **Automated Red vs. Blue Live Battle Campaign:** 5 / 5 items complete (100.0%) — *5-phase kill-chain, live defender telemetry, latency tracking (µs), automated forensic PDF*
-- **Cross-cutting Testing & Verification:** 244 / 244 Pytest tests passing (100.0%)
-- **Overall Completion:** 124 / 124 items complete (100.0%)
+- **Cross-cutting Testing & Verification:** 260 / 260 Pytest tests passing (100.0%)
+- **Overall Completion:** 141 / 141 items complete (100.0%)
+
+
 
 
 ---
@@ -378,6 +383,37 @@
 
 ---
 
+## 🤖 GenAI Incident Investigation Copilot & Remediation Playbooks
+- [x] **Threat Copilot Synthesis Engine (`backend/services/ai_copilot_service.py`):**
+  - [x] Executive root-cause analysis synthesis fusing SHAP feature attributions, Sigma triggers, and MITRE techniques.
+  - [x] Step-by-step containment checklists with volatile memory preservation guidance.
+  - [x] Automated copyable Bash (Linux) and PowerShell (Windows) containment scripts tailored per attack technique.
+- [x] **Interactive SOC Copilot Pane (`dashboard/src/CopilotAdvisorTab.jsx`):**
+  - [x] Multi-scenario investigation launcher (Ransomware T1486, Process Injection T1055, Hydra SSH T1110).
+  - [x] Real-time narrative rendering with one-click clipboard copying.
+- [x] **REST API Endpoint:** `POST /api/copilot/analyze`.
+
+---
+
+## 🌐 STIX 2.1 / TAXII & MISP Threat Intelligence Ingestion
+- [x] **Threat Intelligence Ingestion Engine (`backend/services/threat_intel_service.py`):**
+  - [x] STIX 2.1 Indicator bundle parsing (IPv4, IPv6, Domain, URL, SHA256/MD5/SHA1 File Hashes).
+  - [x] MISP JSON event attribute parsing and TAXII 2.1 polling sync.
+  - [x] Zero-allocation in-memory lookups and CIDR subnet matching for live telemetry flows.
+  - [x] Pre-seeded high-fidelity threat actors: APT29 Cozy Bear C2, LockBit 3.0 Ransomware, WannaCry PE Dropper, Mirai Botnet.
+- [x] **REST API Endpoints:** `GET /api/intel/indicators`, `POST /api/intel/stix/import`, `POST /api/intel/misp/import`, `POST /api/intel/lookup`.
+
+---
+
+## 🔐 SOC Role-Based Access Control (RBAC) & Swarm Agent Auth
+- [x] **Enterprise RBAC & Token Service (`backend/services/rbac_auth_service.py`):**
+  - [x] Cryptographic password hashing (SHA256 + Salt) and session bearer token signing.
+  - [x] Capability hierarchy enforcement: `Admin` (3) > `Analyst` (2) > `Auditor` (1).
+  - [x] Swarm agent mutual authentication via cryptographic HMAC tokens.
+- [x] **REST API Endpoints:** `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/tokens/agent`.
+
+---
+
 ## Testing & Quality Assurance
-- [x] Complete test suite passing with 244 passing tests across unit, integration, and simulation layers.
+- [x] Complete test suite passing with 260 passing tests across unit, integration, simulation, Copilot, Threat Intel, and RBAC layers.
 - [x] Zero regressions across ML engines, P2P mesh consensus, database persistence, rules engines, and API routes.

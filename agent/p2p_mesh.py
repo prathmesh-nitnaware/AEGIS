@@ -514,20 +514,20 @@ if __name__ == "__main__":
     print("=" * 72)
 
     # 1. Instantiate 3 P2P Mesh Nodes
-    node1 = P2PMeshNode(agent_id="vm1", bind_port=9101)
-    node2 = P2PMeshNode(agent_id="vm2", bind_port=9102)
-    node3 = P2PMeshNode(agent_id="vm3", bind_port=9103)
+    node1 = P2PMeshNode(agent_id="node-1", bind_port=9101)
+    node2 = P2PMeshNode(agent_id="node-2", bind_port=9102)
+    node3 = P2PMeshNode(agent_id="node-3", bind_port=9103)
 
     node1.start()
     node2.start()
     node3.start()
 
     # 2. Register mesh topology
-    node1.register_peer("vm2", "127.0.0.1", 9102)
-    node1.register_peer("vm3", "127.0.0.1", 9103)
+    node1.register_peer("node-2", "127.0.0.1", 9102)
+    node1.register_peer("node-3", "127.0.0.1", 9103)
 
-    node2.register_peer("vm1", "127.0.0.1", 9101)
-    node3.register_peer("vm1", "127.0.0.1", 9101)
+    node2.register_peer("node-1", "127.0.0.1", 9101)
+    node3.register_peer("node-1", "127.0.0.1", 9101)
 
     # Pre-record a correlated event on node 2
     node2.correlation_engine.record_local_event(
@@ -535,7 +535,7 @@ if __name__ == "__main__":
         details={"port": 443, "dest_ip": "192.168.1.100"},
     )
 
-    print("\n[Demo] Initiating voting from vm1 for a network anomaly (score=0.85, port=443)...")
+    print("\n[Demo] Initiating voting from node-1 for a network anomaly (score=0.85, port=443)...")
     verdict = node1.initiate_vote(
         event_type="network",
         threat_score=0.85,

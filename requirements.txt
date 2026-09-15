@@ -21,3 +21,5 @@ dnspython
 cryptography
 reportlab
 httpx
+python-multipart
+pyyaml

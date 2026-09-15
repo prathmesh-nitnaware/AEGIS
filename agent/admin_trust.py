@@ -228,9 +228,9 @@ if __name__ == "__main__":
     portal = MaintenanceWindowPortal()
     engine = AdminTrustEngine(portal=portal)
 
-    # 1. Schedule a maintenance window for vm1
+    # 1. Schedule a maintenance window for node-1
     win = portal.schedule_window(
-        agent_id="vm1",
+        agent_id="node-1",
         duration_seconds=300.0,
         approved_by="admin_sec",
         reason="Scheduled OS Security Patching",
@@ -238,7 +238,7 @@ if __name__ == "__main__":
 
     # 2. Evaluate high threat event during maintenance window
     is_supp, score, reason = engine.evaluate_event(
-        agent_id="vm1",
+        agent_id="node-1",
         event_type="process_windows",
         raw_threat_score=0.88,
         process_name="msiexec.exe",
@@ -249,10 +249,10 @@ if __name__ == "__main__":
     print(f"  Adjusted Score   : {score}")
     print(f"  Rationale        : {reason}")
 
-    # 3. Evaluate event on non-maintenance agent (vm2) with Admin Identity
+    # 3. Evaluate event on non-maintenance agent (node-2) with Admin Identity
     admin_id = IdentityContext(user_id="S-1-5-32-544", username="Admin", is_admin=True)
     is_supp2, score2, reason2 = engine.evaluate_event(
-        agent_id="vm2",
+        agent_id="node-2",
         event_type="process_windows",
         raw_threat_score=0.75,
         identity=admin_id,

@@ -17,7 +17,7 @@ Complete Hands-Free Loop:
   7. Command Node records execution to centralized NeonDB AuditLog & WebSocket
 
 Usage:
-  python -m agent.action_consumer --agent-id vm1 --server http://localhost:8000
+  python -m agent.action_consumer --agent-id node-1 --server http://localhost:8000
 """
 
 from __future__ import annotations

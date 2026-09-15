@@ -29,7 +29,7 @@ from agent.heartbeat import HeartbeatEmitter
 # ---------------------------------------------------------------------------
 # Config - edit these or pass env vars AGENT_ID and COMMAND_NODE_URL
 # ---------------------------------------------------------------------------
-AGENT_ID = os.getenv("AGENT_ID", "vm1")
+AGENT_ID = os.getenv("AGENT_ID", "node-1")
 COMMAND_NODE_URL = os.getenv("COMMAND_NODE_URL", "http://localhost:8000").rstrip("/")
 HEARTBEAT_INTERVAL = float(os.getenv("HEARTBEAT_INTERVAL", "5.0"))
 

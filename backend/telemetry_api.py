@@ -2,8 +2,9 @@ import asyncio
 import time
 import logging
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, UploadFile, File, Header
 from fastapi.middleware.cors import CORSMiddleware
+
 
 
 # ============================================================
@@ -1627,6 +1628,171 @@ async def scan_yara_payload_endpoint(payload: dict):
             raise HTTPException(status_code=400, detail=f"Invalid base64 data: {exc}")
     else:
         raise HTTPException(status_code=400, detail="Must provide 'file_path', 'text', or 'base64_data'.")
+
+
+@app.post("/api/rules/sigma/compile")
+async def compile_sigma_rule_endpoint(payload: dict):
+    """Compiles and registers a new Sigma rule from YAML or dictionary payload."""
+    from agent.rules.sigma_translator import default_sigma_translator
+    yaml_content = payload.get("yaml")
+    rule_dict = payload.get("rule")
+    if yaml_content:
+        rule = default_sigma_translator.load_rule_from_yaml(yaml_content)
+    elif rule_dict:
+        rule = default_sigma_translator.compile_rule(rule_dict)
+    else:
+        raise HTTPException(status_code=400, detail="Must provide 'yaml' string or 'rule' dictionary.")
+    return {
+        "status": "compiled",
+        "rule_id": rule.id,
+        "title": rule.title,
+        "level": rule.level,
+        "tags": rule.tags
+    }
+
+
+@app.post("/api/rules/yara/compile")
+async def compile_yara_rule_endpoint(payload: dict):
+    """Compiles and registers a new YARA rule."""
+    from agent.rules.yara_scanner import default_yara_scanner
+    name = payload.get("name")
+    strings_dict = payload.get("strings_dict", {})
+    condition = payload.get("condition", "any of them")
+    meta = payload.get("meta", {})
+    if not name or not strings_dict:
+        raise HTTPException(status_code=400, detail="Must provide 'name' and 'strings_dict'.")
+    rule = default_yara_scanner.add_rule(name=name, strings_dict=strings_dict, condition=condition, meta=meta)
+    return {
+        "status": "compiled",
+        "rule_name": rule.name,
+        "string_count": len(rule.strings),
+        "condition": rule.condition
+    }
+
+
+# ============================================================
+# STRESS BENCHMARK & HARDWARE PROFILER ENDPOINTS
+# ============================================================
+
+@app.post("/api/benchmark/stress-test")
+async def run_collector_stress_test_endpoint(payload: dict = None):
+    """Runs high-throughput synthetic collector queue stress test (e.g. 50k+ ev/s)."""
+    from experiments.benchmarks.stress_test_collectors import SyntheticCollectorStressTest
+    payload = payload or {}
+    target_rate = int(payload.get("target_rate", 50000))
+    duration = float(payload.get("duration", 1.0))
+    threads = int(payload.get("threads", 4))
+
+    tester = SyntheticCollectorStressTest(target_rate=target_rate, duration_seconds=duration, num_threads=threads)
+    results = tester.run()
+    return results
+
+
+@app.get("/api/benchmark/flamegraph")
+async def get_collector_flamegraph_endpoint():
+    """Returns the SVG flamegraph comparing userspace vs eBPF kernel execution."""
+    from experiments.benchmarks.collector_profiler import CollectorHardwareProfiler
+    profiler = CollectorHardwareProfiler()
+    summary = profiler.run_full_benchmark()
+    svg_path = summary.get("flamegraph_path", "experiments/benchmarks/flamegraph_comparison.svg")
+    try:
+        with open(svg_path, "r", encoding="utf-8") as f:
+            svg_data = f.read()
+        return Response(content=svg_data, media_type="image/svg+xml")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read flamegraph SVG: {exc}")
+
+
+# ============================================================
+# AI INCIDENT COPILOT & REMEDIATION PLAYBOOK ENDPOINTS
+# ============================================================
+
+@app.post("/api/copilot/analyze")
+async def analyze_incident_copilot_endpoint(incident_data: dict):
+    """Synthesizes incident data into an executive summary and containment playbooks."""
+    from backend.services.ai_copilot_service import ai_copilot_service
+    return ai_copilot_service.generate_incident_investigation(incident_data)
+
+
+# ============================================================
+# THREAT INTELLIGENCE (STIX 2.1 / TAXII / MISP) ENDPOINTS
+# ============================================================
+
+@app.get("/api/intel/indicators")
+async def list_threat_indicators_endpoint(limit: int = 100):
+    """Lists active in-memory Threat Intelligence indicators (IOCs)."""
+    from backend.services.threat_intel_service import threat_intel_service
+    return {"indicators": threat_intel_service.list_indicators(limit=limit)}
+
+
+@app.post("/api/intel/stix/import")
+async def import_stix_bundle_endpoint(bundle: dict):
+    """Imports a STIX 2.1 JSON Indicator Bundle."""
+    from backend.services.threat_intel_service import threat_intel_service
+    return threat_intel_service.import_stix_bundle(bundle)
+
+
+@app.post("/api/intel/misp/import")
+async def import_misp_event_endpoint(payload: dict):
+    """Imports MISP JSON Event attributes."""
+    from backend.services.threat_intel_service import threat_intel_service
+    return threat_intel_service.import_misp_attributes(payload)
+
+
+@app.post("/api/intel/lookup")
+async def lookup_threat_ioc_endpoint(payload: dict):
+    """Searches active threat intelligence tables for IP, domain, or hash hit."""
+    from backend.services.threat_intel_service import threat_intel_service
+    ioc_type = payload.get("type", "ip")
+    value = payload.get("value", "")
+    hit = threat_intel_service.check_ioc(ioc_type, value)
+    return {"matched": hit is not None, "indicator": hit}
+
+
+# ============================================================
+# ROLE-BASED ACCESS CONTROL (RBAC) & AGENT AUTH ENDPOINTS
+# ============================================================
+
+@app.post("/api/auth/login")
+async def user_login_endpoint(credentials: dict):
+    """Authenticates SOC user and returns scoped session bearer token."""
+    from backend.services.rbac_auth_service import rbac_auth_service
+    username = credentials.get("username", "")
+    password = credentials.get("password", "")
+    auth_result = rbac_auth_service.authenticate_user(username, password)
+    if not auth_result:
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+    return auth_result
+
+
+@app.get("/api/auth/me")
+async def get_current_user_endpoint(authorization: str = Header(None)):
+    """Verifies bearer token and returns current user identity."""
+    from backend.services.rbac_auth_service import rbac_auth_service
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header.")
+    token = authorization.split("Bearer ")[1]
+    payload = rbac_auth_service.verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Session expired or invalid token.")
+    return {"authenticated": True, "user": payload}
+
+
+@app.post("/api/auth/tokens/agent")
+async def issue_agent_token_endpoint(payload: dict, authorization: str = Header(None)):
+    """Issues cryptographic authentication token for a new swarm agent (Requires Admin)."""
+    from backend.services.rbac_auth_service import rbac_auth_service
+    # Optional RBAC check if auth header provided
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split("Bearer ")[1]
+        if not rbac_auth_service.authorize_role(token, "admin"):
+            raise HTTPException(status_code=403, detail="Admin capability required to issue agent tokens.")
+
+    agent_id = payload.get("agent_id")
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="Must specify 'agent_id'.")
+    cluster_id = payload.get("cluster_id", "cluster-alpha")
+    return rbac_auth_service.generate_agent_key(agent_id=agent_id, cluster_id=cluster_id)
 
 
 if __name__ == "__main__":

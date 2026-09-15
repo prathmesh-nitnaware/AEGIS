@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 _simulation_state: Dict[str, Any] = {
     "is_running": False,
     "current_scenario": None,
-    "target_agent_id": "vm1-linux",
+    "target_agent_id": "endpoint-linux",
     "target_ip": "10.0.0.10",
     "start_time": None,
     "completed_at": None,
@@ -37,8 +37,8 @@ def get_available_targets() -> List[Dict[str, Any]]:
     """Returns list of active agent nodes and chain targets available for exploitation."""
     targets = [
         {
-            "id": "vm1-linux",
-            "name": "Linux App Server (vm1)",
+            "id": "node1-linux",
+            "name": "Linux App Server (node-1)",
             "os": "Ubuntu 22.04 LTS",
             "ip": "10.0.0.10",
             "services": ["SSH (22)", "HTTP (80)", "Gunicorn (8000)"],
@@ -46,8 +46,8 @@ def get_available_targets() -> List[Dict[str, Any]]:
             "status": "ONLINE",
         },
         {
-            "id": "vm2-windows",
-            "name": "Windows Workstation (vm2)",
+            "id": "node2-windows",
+            "name": "Windows Workstation (node-2)",
             "os": "Windows 11 Enterprise",
             "ip": "10.0.0.20",
             "services": ["RDP (3389)", "SMB (445)", "WinRM (5985)"],
@@ -55,8 +55,8 @@ def get_available_targets() -> List[Dict[str, Any]]:
             "status": "ONLINE",
         },
         {
-            "id": "vm3-database",
-            "name": "Distributed DB Node (vm3)",
+            "id": "node3-database",
+            "name": "Distributed DB Node (node-3)",
             "os": "Debian 12 Bookworm",
             "ip": "10.0.0.30",
             "services": ["PostgreSQL (5432)", "Redis (6379)"],
@@ -64,8 +64,8 @@ def get_available_targets() -> List[Dict[str, Any]]:
             "status": "ONLINE",
         },
         {
-            "id": "vm4-gateway",
-            "name": "Edge Ingress Gateway (vm4)",
+            "id": "node4-gateway",
+            "name": "Edge Ingress Gateway (node-4)",
             "os": "Alpine Linux 3.19",
             "ip": "10.0.0.1",
             "services": ["Nginx (80/443)", "BGP Wire (179)"],
@@ -74,7 +74,7 @@ def get_available_targets() -> List[Dict[str, Any]]:
         },
         {
             "id": "swarm-broadcast",
-            "name": "Swarm Broadcast (All Chain Nodes)",
+            "name": "Swarm Broadcast (All Swarm Nodes)",
             "os": "Multi-Platform Swarm",
             "ip": "10.0.0.0/24",
             "services": ["P2P Wire Mesh Consensus (9001-9010)"],

@@ -31,7 +31,7 @@ def test_battle_orchestrator_full_campaign(orchestrator):
 
     # Run synchronously with 0 delay for fast automated testing
     success = orchestrator.start_battle(
-        target_agent_id="vm1-linux",
+        target_agent_id="endpoint-linux",
         target_ip="172.30.0.21",
         step_delay=0.0,
         async_run=False,

@@ -86,7 +86,7 @@ class BattleOrchestrator:
         self.current_phase_index: int = 0
         self.start_time: Optional[float] = None
         self.completed_at: Optional[float] = None
-        self.target_agent_id: str = "vm1-linux"
+        self.target_agent_id: str = "endpoint-linux"
         self.target_ip: str = "172.30.0.21"
         self.phase_results: List[PhaseResult] = []
         self.kpis = BattleKPIs()

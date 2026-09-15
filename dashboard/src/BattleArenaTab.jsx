@@ -29,7 +29,7 @@ const KILL_CHAIN_PHASES = [
 export default function BattleArenaTab() {
   const [battleState, setBattleState] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [targetAgent, setTargetAgent] = useState("vm1-linux");
+  const [targetAgent, setTargetAgent] = useState("endpoint-linux");
   const [stepDelay, setStepDelay] = useState(1.5);
   const [toast, setToast] = useState(null);
 
@@ -174,9 +174,9 @@ export default function BattleArenaTab() {
                 fontSize: "12px",
               }}
             >
-              <option value="vm1-linux">vm1-linux (172.30.0.21)</option>
-              <option value="vm2-windows">vm2-windows (172.30.0.22)</option>
-              <option value="vm3-server">vm3-server (172.30.0.23)</option>
+              <option value="endpoint-linux">endpoint-linux (172.30.0.21)</option>
+              <option value="endpoint-windows">endpoint-windows (172.30.0.22)</option>
+              <option value="srv-primary">srv-primary (172.30.0.23)</option>
             </select>
           </div>
 

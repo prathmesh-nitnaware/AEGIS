@@ -147,10 +147,10 @@ Write-Color "  FastAPI Backend / REST / WS:  http://localhost:8000 (API Docs: /d
 Write-Color "  SOC Defender Dashboard:        http://localhost:5173" "White"
 Write-Color "  Red Team Adversary Console:    http://localhost:5174" "White"
 Write-Color "  PostgreSQL / TimescaleDB:      localhost:5432 (User: aegis, DB: aegis)" "White"
-Write-Color "  EDR Agent Swarm Mesh:          3 Containerized Agents (vm1, vm2, vm3)`n" "White"
+Write-Color "  EDR Agent Swarm Mesh:          3 Containerized Agents (node-1, node-2, node-3)`n" "White"
 
 Write-Color "Management Commands:" "Yellow"
 Write-Color "  View live logs:          docker compose logs -f" "White"
-Write-Color "  Run Red Team Simulation: docker compose exec agent-vm1 python -m experiments.simulations.run_multi_node_demo --all" "White"
+Write-Color "  Run Red Team Simulation: docker compose exec agent-node-1 python -m experiments.simulations.run_multi_node_demo --all" "White"
 Write-Color "  Run Swarm Byzantine Sim: python scripts/simulate_swarm_cluster.py --scenario all" "White"
 Write-Color "  Stop stack:              powershell -ExecutionPolicy Bypass -File scripts/deploy_stack.ps1 -Down`n" "White"

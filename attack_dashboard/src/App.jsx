@@ -27,8 +27,8 @@ export default function App() {
   const [gatewayStatus, setGatewayStatus] = useState("DISCONNECTED");
   const [targets, setTargets] = useState([]);
   const [selectedTarget, setSelectedTarget] = useState({
-    id: "vm1-linux",
-    name: "Linux App Server (vm1)",
+    id: "node1-linux",
+    name: "Linux App Server (node-1)",
     ip: "10.0.0.10",
     os: "Ubuntu 22.04 LTS",
   });

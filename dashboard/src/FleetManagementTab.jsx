@@ -14,7 +14,7 @@ import {
 
 export default function FleetManagementTab() {
   const [fleetAgents, setFleetAgents] = useState([]);
-  const [selectedAgent, setSelectedAgent] = useState("vm1-linux");
+  const [selectedAgent, setSelectedAgent] = useState("endpoint-linux");
   const [configParams, setConfigParams] = useState({
     polling_interval_sec: 2.0,
     confidence_threshold: 0.70,
@@ -169,10 +169,20 @@ export default function FleetManagementTab() {
                 fontSize: "12px",
               }}
             >
-              <option value="vm1-linux">vm1-linux</option>
-              <option value="vm2-windows">vm2-windows</option>
-              <option value="vm3-server">vm3-server</option>
-              <option value="*">All Nodes (Broadcast)</option>
+              {fleetAgents.length > 0 ? (
+                fleetAgents.map((ag) => (
+                  <option key={ag.agent_id} value={ag.agent_id}>
+                    {ag.agent_id} ({ag.ip || "Live System"})
+                  </option>
+                ))
+              ) : (
+                <>
+                  <option value="endpoint-linux">endpoint-linux (Awaiting Live Node)</option>
+                  <option value="endpoint-windows">endpoint-windows (Awaiting Live Node)</option>
+                  <option value="srv-primary">srv-primary (Awaiting Live Node)</option>
+                </>
+              )}
+              <option value="*">All Live Nodes (Broadcast)</option>
             </select>
           </div>
 
