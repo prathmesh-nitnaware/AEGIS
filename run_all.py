@@ -54,26 +54,26 @@ def main() -> None:
     processes: list[subprocess.Popen] = []
 
     try:
-        # 1. Start FastAPI Backend
-        print("\n[*] Starting Backend API (Port 8000)...")
+        # 1. Start FastAPI Backend (0.0.0.0 allows external VMs & LAN devices to connect)
+        print("\n[*] Starting Backend API (Port 8000 on 0.0.0.0)...")
         backend_proc = subprocess.Popen(
-            [py_exe, "-m", "uvicorn", "backend.telemetry_api:app", "--host", "127.0.0.1", "--port", "8000"],
+            [py_exe, "-m", "uvicorn", "backend.telemetry_api:app", "--host", "0.0.0.0", "--port", "8000"],
             cwd=str(ROOT_DIR),
         )
         processes.append(backend_proc)
 
         # 2. Start Blue Team SOC Dashboard
-        print("[*] Starting Blue Team SOC Dashboard (Port 5173)...")
+        print("[*] Starting Blue Team SOC Dashboard (Port 5173 on 0.0.0.0)...")
         dashboard_proc = subprocess.Popen(
-            [npm_cmd, "run", "dev", "--", "--host", "127.0.0.1", "--port", "5173"],
+            [npm_cmd, "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"],
             cwd=str(ROOT_DIR / "dashboard"),
         )
         processes.append(dashboard_proc)
 
         # 3. Start Red Team C2 Dashboard
-        print("[*] Starting Red Team Adversary C2 Dashboard (Port 5174)...")
+        print("[*] Starting Red Team Adversary C2 Dashboard (Port 5174 on 0.0.0.0)...")
         attack_proc = subprocess.Popen(
-            [npm_cmd, "run", "dev", "--", "--host", "127.0.0.1", "--port", "5174"],
+            [npm_cmd, "run", "dev", "--", "--host", "0.0.0.0", "--port", "5174"],
             cwd=str(ROOT_DIR / "attack_dashboard"),
         )
         processes.append(attack_proc)
