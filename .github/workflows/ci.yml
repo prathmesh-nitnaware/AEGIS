@@ -1,0 +1,160 @@
+name: AEGIS CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  # =========================================================================
+  # 1. Multi-Platform Pytest Test Matrix (Linux & Windows)
+  # =========================================================================
+  test-python:
+    name: Pytest Suite (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11"]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest anyio pytest-asyncio flake8 ruff
+
+      - name: Execute Full Pytest Test Suite
+        run: |
+          python -m pytest tests/ -v
+
+  # =========================================================================
+  # 2. Code Quality, Formatting & Static Linting
+  # =========================================================================
+  lint:
+    name: Code Quality & Linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Linters
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff flake8
+
+      - name: Run Ruff Linter
+        run: |
+          ruff check agent/ backend/ tests/ --select=E9,F63,F7,F82 --target-version=py311
+
+      - name: Run Flake8 Syntax Checks
+        run: |
+          flake8 agent backend tests --count --select=E9,F63,F7,F82 --show-source --statistics
+
+  # =========================================================================
+  # 3. Standalone Agent Packaging & Ed25519 Cryptographic Validation
+  # =========================================================================
+  package-and-verify:
+    name: Agent Packaging & Ed25519 Signature Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build Distribution Packages (.tar.gz & .zip)
+        run: |
+          python scripts/package_agent.py
+
+      - name: Run Package Verification Tests
+        run: |
+          python -m pytest tests/test_agent_packaging.py tests/test_fleet_and_package_verification.py -v
+
+  # =========================================================================
+  # 4. Frontend Dashboards Production Build
+  # =========================================================================
+  frontend-build:
+    name: SOC Dashboard & Red C2 Console Builds
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build Blue Team SOC Dashboard
+        working-directory: dashboard
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Red Team Adversary C2 Console
+        working-directory: attack_dashboard
+        run: |
+          npm ci
+          npm run build
+
+  # =========================================================================
+  # 5. Multi-Container Docker Build Test
+  # =========================================================================
+  docker-build:
+    name: Docker Container Build Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Backend Command Node Container
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: false
+          tags: aegis-backend:test
+
+      - name: Build SOC Defender Dashboard Container
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.dashboard
+          push: false
+          tags: aegis-soc-dashboard:test
+
+      - name: Build Adversary C2 Console Container
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.attacker
+          push: false
+          tags: aegis-c2-console:test

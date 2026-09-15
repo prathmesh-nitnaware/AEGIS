@@ -1573,6 +1573,62 @@ async def export_compliance_report_pdf_endpoint(payload: dict = None):
     )
 
 
+# ============================================================
+# SIGMA & YARA DETECTION RULE ENGINE ENDPOINTS
+# ============================================================
+
+@app.get("/api/rules/sigma")
+async def list_sigma_rules_endpoint():
+    """Lists all compiled Sigma detection rules."""
+    from agent.rules.sigma_translator import default_sigma_translator
+    return {"rules": default_sigma_translator.list_rules()}
+
+
+@app.post("/api/rules/sigma/evaluate")
+async def evaluate_sigma_event_endpoint(event: dict):
+    """Evaluates an event dictionary against all active compiled Sigma rules."""
+    from agent.rules.sigma_translator import default_sigma_translator
+    matches = default_sigma_translator.evaluate_event(event)
+    return {
+        "matched": len(matches) > 0,
+        "match_count": len(matches),
+        "matches": matches,
+    }
+
+
+@app.get("/api/rules/yara")
+async def list_yara_rules_endpoint():
+    """Lists all active in-memory YARA rules."""
+    from agent.rules.yara_scanner import default_yara_scanner
+    return {"rules": default_yara_scanner.list_rules()}
+
+
+@app.post("/api/rules/yara/scan")
+async def scan_yara_payload_endpoint(payload: dict):
+    """Scans text content, base64 payload, or file path against in-memory YARA rules."""
+    import base64
+    from agent.rules.yara_scanner import default_yara_scanner
+
+    file_path = payload.get("file_path")
+    raw_text = payload.get("text")
+    b64_data = payload.get("base64_data")
+
+    if file_path:
+        return default_yara_scanner.scan_file(file_path)
+    elif raw_text:
+        matches = default_yara_scanner.scan_buffer(raw_text.encode("utf-8"))
+        return {"scanned": True, "is_malicious": len(matches) > 0, "matches": matches}
+    elif b64_data:
+        try:
+            buf = base64.b64decode(b64_data)
+            matches = default_yara_scanner.scan_buffer(buf)
+            return {"scanned": True, "is_malicious": len(matches) > 0, "matches": matches}
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid base64 data: {exc}")
+    else:
+        raise HTTPException(status_code=400, detail="Must provide 'file_path', 'text', or 'base64_data'.")
+
+
 if __name__ == "__main__":
     import os
     import sys
