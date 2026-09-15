@@ -1,6 +1,6 @@
 # ===========================================================================
 # AEGIS EDR Agent - Windows PowerShell Installer & Service Setup Script
-# Run with: powershell -ExecutionPolicy Bypass -File .\install.ps1
+# Run with: powershell -ExecutionPolicy Bypass -File .\scripts\windows\install.ps1
 # ===========================================================================
 
 param (
@@ -23,7 +23,8 @@ if (-not $isAdmin) {
 }
 
 # 2. Verify Python 3.10+
-Write-Host "`n[1/6] Checking Python runtime..." -ForegroundColor Green
+Write-Host ""
+Write-Host "[1/6] Checking Python runtime..." -ForegroundColor Green
 $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
 if (-not $pythonCmd) {
     Write-Host "[ERROR] Python 3.10+ was not found in PATH." -ForegroundColor Red
@@ -90,7 +91,7 @@ $taskName = "AEGIS-EDR-Agent"
 # Remove existing task if present
 Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 
-$taskArgs = "-m agent.daemon_service start --config '$configFile'"
+$taskArgs = "-m agent.daemon_service start --config `"$configFile`""
 $action = New-ScheduledTaskAction -Execute $venvPython -Argument $taskArgs -WorkingDirectory $InstallDir
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -99,8 +100,9 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "AEGIS Autonomous EDR Agent Daemon" | Out-Null
 Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 
-Write-Host "`n=================================================================" -ForegroundColor Cyan
-Write-Host "  ✓ AEGIS EDR AGENT INSTALLED AND REGISTERED SUCCESSFULLY!       " -ForegroundColor Green
+Write-Host ""
+Write-Host "=================================================================" -ForegroundColor Cyan
+Write-Host "  [OK] AEGIS EDR AGENT INSTALLED AND REGISTERED SUCCESSFULLY!    " -ForegroundColor Green
 Write-Host "=================================================================" -ForegroundColor Cyan
 Write-Host "  Service Task:     $taskName (SYSTEM level, Auto-Start)"
 Write-Host "  Node Identifier:  $AgentId"
