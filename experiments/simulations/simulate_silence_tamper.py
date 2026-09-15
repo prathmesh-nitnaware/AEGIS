@@ -17,7 +17,7 @@ import json
 import os
 
 COMMAND_NODE_URL = os.getenv("COMMAND_NODE_URL", "http://localhost:8000").rstrip("/")
-AGENT_ID = os.getenv("AGENT_ID", "vm3-sabotaged-node")
+AGENT_ID = os.getenv("AGENT_ID", "node-sabotage-test")
 
 
 def run_simulation():

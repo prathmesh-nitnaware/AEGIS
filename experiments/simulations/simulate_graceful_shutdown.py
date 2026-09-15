@@ -5,7 +5,7 @@ AEGIS Phase 5 — Simulation 4: Graceful User-Initiated Shutdown
 Demonstrates what happens when a legitimate user shuts down or reboots their PC.
 
 Workflow:
-  1. Node vm4-planned-reboot sends regular heartbeats.
+  1. Node node-reboot-test sends regular heartbeats.
   2. The user initiates a clean OS shutdown / reboot (Start -> Shut Down or systemctl poweroff).
   3. The agent hooks the OS termination signal and transmits an emergency Synchronous
      'Last-Gasp' Goodbye beacon to /api/heartbeat/shutdown.
@@ -20,7 +20,7 @@ import json
 import os
 
 COMMAND_NODE_URL = os.getenv("COMMAND_NODE_URL", "http://localhost:8000").rstrip("/")
-AGENT_ID = os.getenv("AGENT_ID", "vm4-planned-reboot")
+AGENT_ID = os.getenv("AGENT_ID", "node-reboot-test")
 
 
 def run_simulation():

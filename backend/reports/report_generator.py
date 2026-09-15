@@ -198,9 +198,9 @@ def build_executive_pdf(report_data: Dict[str, Any]) -> bytes:
     incidents = report_data.get("incidents", [])
     if not incidents:
         incidents = [
-            {"time": "2026-09-13 17:42:10", "agent": "vm1-linux", "type": "Hydra SSH Brute Force", "verdict": "KILL_PROCESS", "status": "MITIGATED"},
-            {"time": "2026-09-13 17:42:15", "agent": "vm2-windows", "type": "Ransomware PE Dropper", "verdict": "ISOLATE_HOST", "status": "MITIGATED"},
-            {"time": "2026-09-13 17:42:20", "agent": "vm3-sabotaged-node", "type": "Process Tamper / Silence", "verdict": "SILENT_ALARM", "status": "ESCALATED"},
+            {"time": "2026-09-13 17:42:10", "agent": "endpoint-linux", "type": "Hydra SSH Brute Force", "verdict": "KILL_PROCESS", "status": "MITIGATED"},
+            {"time": "2026-09-13 17:42:15", "agent": "endpoint-windows", "type": "Ransomware PE Dropper", "verdict": "ISOLATE_HOST", "status": "MITIGATED"},
+            {"time": "2026-09-13 17:42:20", "agent": "srv-primary", "type": "Process Tamper / Silence", "verdict": "SILENT_ALARM", "status": "ESCALATED"},
         ]
 
     inc_rows = [

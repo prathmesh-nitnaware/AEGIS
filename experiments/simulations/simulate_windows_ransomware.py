@@ -25,7 +25,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 COMMAND_NODE_URL = os.getenv("COMMAND_NODE_URL", "http://localhost:8000").rstrip("/")
-AGENT_ID = os.getenv("AGENT_ID", "vm2-windows")
+AGENT_ID = os.getenv("AGENT_ID", "endpoint-windows")
 
 
 def run_simulation():

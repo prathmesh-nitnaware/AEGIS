@@ -981,9 +981,15 @@ async def acknowledge_alert(alarm_id: int, payload: dict = {}):
     try:
         async with get_session() as session:
             await acknowledge_silence_alarm(session, alarm_id, acknowledged_by)
+        # Also clean up silence detector memory state
+        with silence_detector._lock:
+            for aid in list(silence_detector._tracked.keys()):
+                if silence_detector._tracked[aid].alarm_raised:
+                    silence_detector._tracked.pop(aid, None)
         return {"status": "acknowledged", "alarm_id": alarm_id}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
 
 
 # ============================================================
