@@ -27,6 +27,9 @@ import {
   Zap,
   Radio,
   Skull,
+  Swords,
+  Sliders,
+  Award,
 } from "lucide-react";
 import {
   AreaChart,
@@ -44,6 +47,10 @@ import ReportModal from "./ReportModal";
 import XAIExplanationModal from "./XAIExplanationModal";
 import BenchmarkTab from "./BenchmarkTab";
 import PcapReplayerTab from "./PcapReplayerTab";
+import BattleArenaTab from "./BattleArenaTab";
+import KernelCollectorsTab from "./KernelCollectorsTab";
+import FleetManagementTab from "./FleetManagementTab";
+import ComplianceAuditTab from "./ComplianceAuditTab";
 
 /* ═══════════════════════════════════════════════
    Comprehensive Syscall Mapping Dictionary
@@ -734,6 +741,40 @@ export default function App() {
           >
             <Radio size={16} />
             PCAP Capture & Replayer
+          </button>
+
+          <div className="nav-section" style={{ marginTop: 14 }}>ENTERPRISE &amp; WARFARE</div>
+
+          <button
+            className={`nav-item ${activeTab === "battle" ? "active" : ""}`}
+            onClick={() => setActiveTab("battle")}
+          >
+            <Swords size={16} />
+            Live Battle Arena
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === "kernel" ? "active" : ""}`}
+            onClick={() => setActiveTab("kernel")}
+          >
+            <Cpu size={16} />
+            Kernel eBPF &amp; ETW
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === "fleet_mgmt" ? "active" : ""}`}
+            onClick={() => setActiveTab("fleet_mgmt")}
+          >
+            <Sliders size={16} />
+            Fleet &amp; Hot-Update
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === "compliance_tab" ? "active" : ""}`}
+            onClick={() => setActiveTab("compliance_tab")}
+          >
+            <Award size={16} />
+            Compliance &amp; Audit PDF
           </button>
         </nav>
 
@@ -1793,6 +1834,34 @@ export default function App() {
                 });
               }}
             />
+          </section>
+        )}
+
+        {/* TAB: LIVE RED VS BLUE BATTLE ARENA */}
+        {activeTab === "battle" && (
+          <section className="content-grid" style={{ display: "block" }}>
+            <BattleArenaTab />
+          </section>
+        )}
+
+        {/* TAB: KERNEL eBPF & ETW TELEMETRY */}
+        {activeTab === "kernel" && (
+          <section className="content-grid" style={{ display: "block" }}>
+            <KernelCollectorsTab />
+          </section>
+        )}
+
+        {/* TAB: FLEET MANAGEMENT & HOT-UPDATE */}
+        {activeTab === "fleet_mgmt" && (
+          <section className="content-grid" style={{ display: "block" }}>
+            <FleetManagementTab />
+          </section>
+        )}
+
+        {/* TAB: COMPLIANCE & AUDIT REPORTING */}
+        {activeTab === "compliance_tab" && (
+          <section className="content-grid" style={{ display: "block" }}>
+            <ComplianceAuditTab />
           </section>
         )}
 
