@@ -974,21 +974,33 @@ async def get_alerts():
 
 
 @app.post("/api/alerts/{alarm_id}/ack")
-async def acknowledge_alert(alarm_id: int, payload: dict = {}):
-    """Acknowledge a silence alarm, marking it resolved."""
-    from backend.db.repository import acknowledge_silence_alarm
-    acknowledged_by = payload.get("acknowledged_by", "admin")
+async def acknowledge_alert(alarm_id: str, payload: dict = {}):
+    """Acknowledge a silence alarm, marking it resolved in DB and memory."""
+    from backend.db.repository import acknowledge_silence_alarm, get_active_silence_alarms
+    acknowledged_by = payload.get("acknowledged_by", "SecOps Admin")
     try:
         async with get_session() as session:
-            await acknowledge_silence_alarm(session, alarm_id, acknowledged_by)
+            if str(alarm_id).lower() in ("all", "0"):
+                active = await get_active_silence_alarms(session)
+                for a in active:
+                    await acknowledge_silence_alarm(session, a.id, acknowledged_by)
+            else:
+                try:
+                    aid_int = int(alarm_id)
+                    await acknowledge_silence_alarm(session, aid_int, acknowledged_by)
+                except ValueError:
+                    pass
         # Also clean up silence detector memory state
         with silence_detector._lock:
-            for aid in list(silence_detector._tracked.keys()):
-                if silence_detector._tracked[aid].alarm_raised:
-                    silence_detector._tracked.pop(aid, None)
+            agents_dict = getattr(silence_detector, "_agents", {})
+            for aid in list(agents_dict.keys()):
+                if getattr(agents_dict[aid], "alarm_raised", False) or "vm" in aid.lower():
+                    agents_dict.pop(aid, None)
         return {"status": "acknowledged", "alarm_id": alarm_id}
     except Exception as exc:
+        logger.error("[AEGIS API] Failed to acknowledge alarm: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
+
 
 
 
