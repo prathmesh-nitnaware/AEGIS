@@ -57,7 +57,7 @@ export default function App() {
   });
   const [isConfigOpen, setIsConfigOpen] = useState(false);
 
-  const terminalEndRef = useRef(null);
+  const terminalBoxRef = useRef(null);
   const pollTimerRef = useRef(null);
 
   // 1. Fetch available target systems in the chain
@@ -109,9 +109,11 @@ export default function App() {
     };
   }, [gatewayUrl]);
 
-  // Auto-scroll terminal to bottom on new logs
+  // Auto-scroll ONLY internal terminal box to bottom on new logs without scrolling the whole page
   useEffect(() => {
-    terminalEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (terminalBoxRef.current) {
+      terminalBoxRef.current.scrollTop = terminalBoxRef.current.scrollHeight;
+    }
   }, [attackState.logs]);
 
   // 3. Launch Exploitation Vector
@@ -653,6 +655,7 @@ export default function App() {
 
         {/* Console Box */}
         <div
+          ref={terminalBoxRef}
           style={{
             background: "#0c0c0e",
             border: "1px solid rgba(63, 63, 70, 0.5)",
@@ -686,7 +689,6 @@ export default function App() {
               );
             })
           )}
-          <div ref={terminalEndRef} />
         </div>
       </section>
     </div>
