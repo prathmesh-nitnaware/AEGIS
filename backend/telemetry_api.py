@@ -1108,35 +1108,35 @@ async def get_report_preview():
             actions = await get_audit_log(session, limit=20)
             agents = await get_all_agent_trust(session)
             
-            critical_count = sum(1 for v in verdicts if v.final_threat_score >= 0.8) + len(alarms)
+            critical_count = sum(1 for v in verdicts if getattr(v, "final_weighted_score", 0.0) >= 0.8) + len(alarms)
             
             return {
                 "generated_at": time.time(),
                 "metrics": {
                     "critical_threats": critical_count,
                     "consensus_accuracy": "99.4%",
-                    "active_nodes": len(agents) if agents else 3,
+                    "active_nodes": len(agents) if agents else 1,
                     "actions_taken": len(actions),
                 },
                 "active_alarms_count": len(alarms),
                 "verdicts_count": len(verdicts),
                 "actions_count": len(actions),
-                "fleet_size": len(agents) if agents else 3,
+                "fleet_size": len(agents) if agents else 1,
             }
     except Exception as exc:
         logger.warning("Error generating report preview: %s", exc)
         return {
             "generated_at": time.time(),
             "metrics": {
-                "critical_threats": 3,
+                "critical_threats": 0,
                 "consensus_accuracy": "99.4%",
-                "active_nodes": 3,
-                "actions_taken": 12,
+                "active_nodes": 1,
+                "actions_taken": 0,
             },
-            "active_alarms_count": 1,
-            "verdicts_count": 20,
-            "actions_count": 12,
-            "fleet_size": 3,
+            "active_alarms_count": 0,
+            "verdicts_count": 0,
+            "actions_count": 0,
+            "fleet_size": 1,
         }
 
 
@@ -1152,17 +1152,19 @@ async def export_executive_report_pdf():
             actions = await get_audit_log(session, limit=10)
             agents = await get_all_agent_trust(session)
 
-            critical_count = sum(1 for v in verdicts if v.final_threat_score >= 0.8) + len(alarms)
+            critical_count = sum(1 for v in verdicts if getattr(v, "final_weighted_score", 0.0) >= 0.8) + len(alarms)
 
             incidents = []
             for v in verdicts:
-                sev = "CRITICAL" if v.final_threat_score >= 0.8 else ("HIGH" if v.final_threat_score >= 0.5 else "MEDIUM")
+                score = getattr(v, "final_weighted_score", 0.0)
+                ts = getattr(v, "verdict_timestamp", time.time())
+                sev = "CRITICAL" if score >= 0.8 else ("HIGH" if score >= 0.5 else "MEDIUM")
                 incidents.append({
-                    "time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(v.timestamp if v.timestamp < 1e11 else v.timestamp / 1000)),
-                    "agent": v.agent_id,
-                    "type": f"Consensus Vote #{v.vote_id[:8]}",
-                    "verdict": v.final_verdict,
-                    "status": "MITIGATED" if v.final_threat_score >= 0.8 else "ANALYZED",
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts if ts < 1e11 else ts / 1000)),
+                    "agent": getattr(v, "origin_agent_id", "endpoint"),
+                    "type": f"Consensus Vote #{str(getattr(v, 'vote_id', '00000000'))[:8]}",
+                    "verdict": getattr(v, "response_action", "LOG"),
+                    "status": "MITIGATED" if score >= 0.8 else "ANALYZED",
                 })
 
             report_data = {

@@ -435,8 +435,8 @@ export default function ThreatIntelTab({ backendUrl = "http://127.0.0.1:8000" })
                 filteredIndicators.map((ind) => (
                   <tr key={ind.id}>
                     <td>
-                      <span className={`cti-type-badge ${ind.indicator_type}`}>
-                        {ind.indicator_type.toUpperCase()}
+                      <span className={`cti-type-badge ${ind.indicator_type || "ioc"}`}>
+                        {(ind.indicator_type || "IOC").toUpperCase()}
                       </span>
                     </td>
                     <td>
