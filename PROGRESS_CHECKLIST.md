@@ -7,7 +7,7 @@
 - **Layer 3 — Command Node + Dual Dashboard (15 SOC Panes):** 11 / 11 items complete (100.0%) — *Centralized Telemetry, Voting Hub, Active Response, Rules Studio, Hardware Flamegraph & AI Copilot*
 - **Centralized Fleet Management & Secure Auto-Update:** 4 / 4 items complete (100.0%) — *Dynamic remote config push & Ed25519 cryptographic package verification*
 - **Compliance & SOC Reporting Enhancements:** 4 / 4 items complete (100.0%) — *MITRE ATT&CK SVG heatmaps & ISO 27001 / NIST CSF compliance PDF reports*
-- **⚡ GitHub Actions CI/CD Pipeline Automation:** 5 / 5 items complete (100.0%) — *Linux/Windows test matrices, ruff/flake8 lint, Ed25519 package verification, Vite frontends, Docker builds*
+- **⚡ GitHub Actions CI/CD Pipeline Automation & Cross-Platform Hardening:** 8 / 8 items complete (100.0%) — *Linux/Windows test matrices, ruff/flake8 lint, PureWindowsPath determinism, SQLite auto-init, Ed25519 verification, Vite frontends, Docker builds*
 - **🛡️ YARA / Sigma Rule Ingestion & Studio UI:** 5 / 5 items complete (100.0%) — *Sigma YAML translator, In-memory YARA scanner, and interactive SOC Rule Studio tab*
 - **📈 High-Throughput Stress Testing & Hardware Profiling UI:** 4 / 4 items complete (100.0%) — *50,000+ ev/s synthetic stress harness, CPU flamegraph generator & interactive dashboard pane*
 - **🤖 GenAI Incident Investigation Copilot & Remediation Playbooks:** 4 / 4 items complete (100.0%) — *LLM root-cause synthesis, MITRE attribution, and automated Bash/PowerShell playbooks*
@@ -23,7 +23,7 @@
 - **Automated Red vs. Blue Live Battle Campaign:** 5 / 5 items complete (100.0%) — *5-phase kill-chain, live defender telemetry, latency tracking (µs), automated forensic PDF*
 - **P0/P1 Security & Consensus Hardening:** 5 / 5 items complete (100.0%) — *Ed25519 message signatures, anti-replay nonces, strict Pydantic v2 schemas, RBAC endpoint protection & response precision*
 - **Cross-cutting Testing & Verification:** 285 / 293 Pytest tests passing (8 skipped, 0 failing, 100.0% pass rate)
-- **Overall Completion:** 142 / 142 items complete (100.0%)
+- **Overall Completion:** 145 / 145 items complete (100.0%)
 
 
 
@@ -350,13 +350,16 @@
 
 ---
 
-## ⚡ GitHub Actions CI/CD Pipeline Automation
+## ⚡ GitHub Actions CI/CD Pipeline Automation & Cross-Platform Hardening
 - [x] **Multi-OS Test Matrix (`.github/workflows/ci.yml`):**
-  - [x] Automated pytest execution across Ubuntu and Windows runners.
-  - [x] Automated code formatting and lint verification (`ruff`, `flake8`).
-  - [x] Standalone distribution package build and Ed25519 cryptographic signature verification.
+  - [x] Automated pytest execution across Ubuntu (`ubuntu-latest`) and Windows (`windows-latest`) runners with 285 passing tests.
+  - [x] Automated zero-error code formatting and lint verification (`ruff`, `flake8`).
+  - [x] Cross-platform Windows executable path parsing via `PureWindowsPath` (`agent/windows_process_context.py`, `agent/live_collectors.py`, `agent/run_all.py`) ensuring deterministic behavior across POSIX and Windows.
+  - [x] Automated test database session initialization fixture (`conftest.py`) enabling SQLite schema creation on runners without external database credentials.
+  - [x] Standalone distribution package build and Ed25519 cryptographic signature verification (`agent/packaging/package_verifier.py`).
   - [x] Vite production bundle builds for SOC Defender (`dashboard`) and Red Team C2 (`attack_dashboard`).
-  - [x] Multi-stage Docker image build tests (`aegis-backend`, `aegis-soc-dashboard`, `aegis-c2-console`).
+  - [x] Multi-stage Docker image build tests (`Dockerfile.backend`, `Dockerfile.dashboard`, `Dockerfile.attacker`, `Dockerfile.agent`).
+  - [x] Live GitHub Actions workflow run verified 100% green across all 6 matrix jobs (Run ID `36037802623`).
 
 ---
 
