@@ -14,6 +14,14 @@ Supported Actions:
 * **ISOLATE_HOST**: Applies temporary local firewall rules (`netsh advfirewall` on Windows,
   `iptables` on Linux) to drop external network traffic while maintaining Command Node connectivity.
 * **UNISOLATE_HOST**: Restores host firewall rules to normal state.
+
+Execution States:
+- **EXECUTED**: Real OS operation completed successfully.
+- **SIMULATED**: Simulation mode active or unprivileged safe fallback without OS elevation.
+- **FAILED**: Operation execution encountered fatal error.
+- **PARTIAL**: Sub-actions partially succeeded (e.g. allow rule succeeded, block rule failed).
+- **NOT_FOUND**: Target PID or file path does not exist.
+- **DENIED**: Protected PID or permission denied.
 """
 
 from __future__ import annotations
@@ -43,6 +51,7 @@ logging.basicConfig(
 class AgentResponseDriver:
     """
     Cross-platform active response execution driver for AEGIS endpoint agents.
+    Distinguishes real host enforcement from safe simulation.
     """
 
     def __init__(
@@ -50,10 +59,17 @@ class AgentResponseDriver:
         quarantine_dir: str = ".aegis_quarantine",
         audit_log_path: str = "aegis_audit.log",
         command_node_ip: str = "172.16.242.184",
+        response_mode: Optional[str] = None,
+        simulation_mode: Optional[bool] = None,
     ) -> None:
         self.quarantine_dir = Path(quarantine_dir).resolve()
         self.audit_log_path = Path(audit_log_path).resolve()
         self.command_node_ip = command_node_ip
+        # Response mode: "real" or "simulation"
+        if simulation_mode is not None:
+            self.response_mode = "simulation" if simulation_mode else "real"
+        else:
+            self.response_mode = (response_mode or os.getenv("AEGIS_RESPONSE_MODE", "simulation")).lower()
 
         # Ensure quarantine folder exists
         self.quarantine_dir.mkdir(parents=True, exist_ok=True)
@@ -75,15 +91,23 @@ class AgentResponseDriver:
         except Exception as exc:
             logger.warning("[ResponseDriver] Failed to write audit log: %s", exc)
 
-        return {"status": "success", "record": record}
+        return {"status": "EXECUTED", "record": record}
 
     def kill_process(self, pid: int) -> Dict[str, Any]:
         """
         Terminate a target process PID and its entire child process tree.
         """
-        logger.info("[ResponseDriver] Attempting KILL_PROCESS for PID %d", pid)
+        logger.info("[ResponseDriver] Attempting KILL_PROCESS for PID %d (mode=%s)", pid, self.response_mode)
+        is_sim = (self.response_mode == "simulation")
         if pid <= 4:
-            return {"status": "failed", "reason": "Protected system PID"}
+            res = {"status": "DENIED", "reason": "Protected system PID", "target_pid": pid, "simulation": is_sim}
+            self.log_action("KILL_PROCESS", res)
+            return res
+
+        if is_sim:
+            res = {"status": "SIMULATED", "target_pid": pid, "mode": "simulation", "simulation": True}
+            self.log_action("KILL_PROCESS", res)
+            return res
 
         killed_pids: List[int] = []
         try:
@@ -100,16 +124,16 @@ class AgentResponseDriver:
             parent.kill()
             killed_pids.append(pid)
             logger.info("[ResponseDriver] Successfully killed PID %d (and %d children)", pid, len(children))
-            res = {"status": "success", "target_pid": pid, "killed_pids": killed_pids}
+            res = {"status": "EXECUTED", "target_pid": pid, "killed_pids": killed_pids, "simulation": False}
         except psutil.NoSuchProcess:
             logger.warning("[ResponseDriver] Process PID %d not found (already exited)", pid)
-            res = {"status": "not_found", "target_pid": pid}
+            res = {"status": "NOT_FOUND", "target_pid": pid, "simulation": False}
         except psutil.AccessDenied as exc:
             logger.error("[ResponseDriver] Access denied killing PID %d: %s", pid, exc)
-            res = {"status": "failed", "reason": str(exc), "target_pid": pid}
+            res = {"status": "DENIED", "reason": str(exc), "target_pid": pid, "simulation": False}
         except Exception as exc:
             logger.error("[ResponseDriver] Error killing PID %d: %s", pid, exc)
-            res = {"status": "error", "reason": str(exc), "target_pid": pid}
+            res = {"status": "FAILED", "reason": str(exc), "target_pid": pid, "simulation": False}
 
         self.log_action("KILL_PROCESS", res)
         return res
@@ -121,8 +145,14 @@ class AgentResponseDriver:
         p = Path(file_path).resolve()
         logger.info("[ResponseDriver] Attempting QUARANTINE_FILE for '%s'", p)
 
+        is_sim = (self.response_mode == "simulation")
         if not p.exists() or not p.is_file():
-            res = {"status": "failed", "reason": "File does not exist", "path": str(p)}
+            res = {"status": "NOT_FOUND", "reason": "File does not exist", "path": str(p), "simulation": is_sim}
+            self.log_action("QUARANTINE_FILE", res)
+            return res
+
+        if is_sim:
+            res = {"status": "SIMULATED", "path": str(p), "mode": "simulation", "simulation": True}
             self.log_action("QUARANTINE_FILE", res)
             return res
 
@@ -138,10 +168,13 @@ class AgentResponseDriver:
                 pass
 
             logger.info("[ResponseDriver] Successfully quarantined '%s' -> '%s'", p, dest_path)
-            res = {"status": "success", "original_path": str(p), "quarantine_path": str(dest_path)}
+            res = {"status": "EXECUTED", "original_path": str(p), "quarantine_path": str(dest_path), "simulation": False}
+        except PermissionError as exc:
+            logger.error("[ResponseDriver] Permission denied quarantining '%s': %s", p, exc)
+            res = {"status": "DENIED", "reason": str(exc), "path": str(p), "simulation": False}
         except Exception as exc:
             logger.error("[ResponseDriver] Failed to quarantine '%s': %s", p, exc)
-            res = {"status": "failed", "reason": str(exc), "path": str(p)}
+            res = {"status": "FAILED", "reason": str(exc), "path": str(p), "simulation": False}
 
         self.log_action("QUARANTINE_FILE", res)
         return res
@@ -149,33 +182,35 @@ class AgentResponseDriver:
     def isolate_host(self, command_node_ip: Optional[str] = None) -> Dict[str, Any]:
         """
         Apply local OS firewall rules to isolate the host while still
-        permitting outbound communication to the Command Node so the
-        agent keeps reporting.
+        permitting outbound communication to the Command Node.
 
-        Windows  — uses netsh advfirewall:
-          1. Block ALL outbound traffic (AEGIS_BlockAll rule)
-          2. Allow outbound to command_node_ip (AEGIS_AllowCN rule)
-          3. Allow established inbound responses (stateful — Windows default)
-
-        Linux    — uses iptables:
-          1. Flush existing OUTPUT rules
-          2. Allow outbound to command_node_ip
-          3. Drop everything else outbound
-
-        Falls back to 'simulated_success' if the process lacks the
-        required privileges, so unit tests still pass without elevation.
+        Returns explicit status:
+        - SIMULATED: when in simulation mode or fallback without root/admin.
+        - EXECUTED: when firewall rules were genuinely applied.
+        - FAILED / PARTIAL / DENIED: on real failure.
         """
         cn_ip = command_node_ip or self.command_node_ip
-        logger.info("[ResponseDriver] Executing ISOLATE_HOST (Command Node IP=%s)", cn_ip)
+        logger.info("[ResponseDriver] Executing ISOLATE_HOST (Command Node IP=%s, mode=%s)", cn_ip, self.response_mode)
         os_type = platform.system()
 
-        success = False
-        simulated = False
-        details: Dict[str, Any] = {"os": os_type, "command_node_ip": cn_ip, "rules_applied": []}
+        details: Dict[str, Any] = {
+            "os": os_type,
+            "command_node_ip": cn_ip,
+            "rules_applied": [],
+            "mode": self.response_mode,
+        }
 
+        if self.response_mode == "simulation":
+            self.is_isolated = True
+            details["simulated"] = True
+            res = {"status": "SIMULATED", "details": details, "simulation": True}
+            self.log_action("ISOLATE_HOST", res)
+            return res
+
+        # Real Mode Execution
         if os_type == "Windows":
             try:
-                # Rule 1: Allow outbound specifically to Command Node (must be added BEFORE block rule)
+                # Rule 1: Allow outbound specifically to Command Node
                 allow_cmd = [
                     "netsh", "advfirewall", "firewall", "add", "rule",
                     "name=AEGIS_AllowCN",
@@ -186,7 +221,7 @@ class AgentResponseDriver:
                     "enable=yes",
                 ]
                 r1 = subprocess.run(allow_cmd, capture_output=True, timeout=5, text=True)
-                details["rules_applied"].append(f"AEGIS_AllowCN → {r1.returncode}")
+                details["rules_applied"].append(f"AEGIS_AllowCN -> {r1.returncode}")
 
                 # Rule 2: Block ALL other outbound traffic
                 block_cmd = [
@@ -199,92 +234,89 @@ class AgentResponseDriver:
                     "enable=yes",
                 ]
                 r2 = subprocess.run(block_cmd, capture_output=True, timeout=5, text=True)
-                details["rules_applied"].append(f"AEGIS_BlockAll → {r2.returncode}")
+                details["rules_applied"].append(f"AEGIS_BlockAll -> {r2.returncode}")
 
                 if r1.returncode == 0 and r2.returncode == 0:
-                    success = True
-                else:
+                    self.is_isolated = True
+                    status = "EXECUTED"
+                elif r1.returncode == 0 or r2.returncode == 0:
+                    status = "PARTIAL"
                     details["stdout"] = r1.stdout + r2.stdout
                     details["stderr"] = r1.stderr + r2.stderr
-                    simulated = True
-                    success = True  # treat partial as simulated success
+                else:
+                    status = "FAILED"
+                    details["stdout"] = r1.stdout + r2.stdout
+                    details["stderr"] = r1.stderr + r2.stderr
             except subprocess.TimeoutExpired:
                 details["error"] = "netsh timed out"
-                simulated = True
-                success = True
+                status = "FAILED"
             except PermissionError as exc:
                 details["error"] = f"Insufficient privileges: {exc}"
-                simulated = True
-                success = True
+                status = "DENIED"
             except Exception as exc:
                 details["error"] = str(exc)
-                simulated = True
-                success = True
+                status = "FAILED"
 
         else:  # Linux / macOS
             try:
-                # Allow established + related (don't break existing connections)
                 subprocess.run(
                     ["iptables", "-I", "OUTPUT", "1", "-m", "state",
                      "--state", "ESTABLISHED,RELATED", "-j", "ACCEPT"],
                     capture_output=True, timeout=5, check=False,
                 )
-                # Allow outbound to Command Node
                 r_cn = subprocess.run(
                     ["iptables", "-I", "OUTPUT", "2",
                      "-d", cn_ip, "-j", "ACCEPT"],
                     capture_output=True, timeout=5, text=True, check=False,
                 )
-                details["rules_applied"].append(f"iptables ALLOW {cn_ip} → {r_cn.returncode}")
+                details["rules_applied"].append(f"iptables ALLOW {cn_ip} -> {r_cn.returncode}")
 
-                # Drop everything else outbound
                 r_drop = subprocess.run(
                     ["iptables", "-A", "OUTPUT", "-j", "DROP"],
                     capture_output=True, timeout=5, text=True, check=False,
                 )
-                details["rules_applied"].append(f"iptables DROP all → {r_drop.returncode}")
+                details["rules_applied"].append(f"iptables DROP all -> {r_drop.returncode}")
 
                 if r_cn.returncode == 0 and r_drop.returncode == 0:
-                    success = True
+                    self.is_isolated = True
+                    status = "EXECUTED"
+                elif r_cn.returncode == 0 or r_drop.returncode == 0:
+                    status = "PARTIAL"
                 else:
-                    simulated = True
-                    success = True
+                    status = "FAILED"
             except subprocess.TimeoutExpired:
                 details["error"] = "iptables timed out"
-                simulated = True
-                success = True
+                status = "FAILED"
             except PermissionError as exc:
                 details["error"] = f"Insufficient privileges: {exc}"
-                simulated = True
-                success = True
+                status = "DENIED"
             except FileNotFoundError:
                 details["error"] = "iptables not found on PATH"
-                simulated = True
-                success = True
+                status = "FAILED"
             except Exception as exc:
                 details["error"] = str(exc)
-                simulated = True
-                success = True
+                status = "FAILED"
 
-        self.is_isolated = True
-        status = "simulated_success" if simulated else ("success" if success else "failed")
-        res = {"status": status, "details": details}
+        res = {"status": status, "details": details, "simulation": False}
         self.log_action("ISOLATE_HOST", res)
         return res
 
     def unisolate_host(self) -> Dict[str, Any]:
         """
         Remove the AEGIS isolation firewall rules and restore normal networking.
-
-        Windows: deletes AEGIS_BlockAll and AEGIS_AllowCN rules by name.
-        Linux:   flushes the OUTPUT chain rules added by isolate_host().
-        Falls back gracefully if the rules don't exist (already removed).
         """
-        logger.info("[ResponseDriver] Executing UNISOLATE_HOST")
+        logger.info("[ResponseDriver] Executing UNISOLATE_HOST (mode=%s)", self.response_mode)
         os_type = platform.system()
-        details: Dict[str, Any] = {"os": os_type, "rules_removed": []}
-        simulated = False
+        details: Dict[str, Any] = {"os": os_type, "rules_removed": [], "mode": self.response_mode}
 
+        if self.response_mode == "simulation":
+            self.is_isolated = False
+            details["simulated"] = True
+            res = {"status": "SIMULATED", "message": "Host un-isolated (simulation)", "details": details, "simulation": True}
+            self.log_action("UNISOLATE_HOST", res)
+            return res
+
+        status = "EXECUTED"
         if os_type == "Windows":
             for rule_name in ("AEGIS_BlockAll", "AEGIS_AllowCN"):
                 try:
@@ -292,13 +324,17 @@ class AgentResponseDriver:
                         ["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_name}"],
                         capture_output=True, timeout=5, text=True, check=False,
                     )
-                    details["rules_removed"].append(f"{rule_name} → {r.returncode}")
+                    details["rules_removed"].append(f"{rule_name} -> {r.returncode}")
+                    if r.returncode != 0:
+                        status = "PARTIAL"
+                except PermissionError as exc:
+                    details["rules_removed"].append(f"{rule_name} -> permission denied: {exc}")
+                    status = "DENIED"
                 except Exception as exc:
-                    details["rules_removed"].append(f"{rule_name} → error: {exc}")
-                    simulated = True
+                    details["rules_removed"].append(f"{rule_name} -> error: {exc}")
+                    status = "FAILED"
         else:  # Linux
             try:
-                # Remove the specific rules added by isolate_host()
                 for rule in [
                     ["-D", "OUTPUT", "-j", "DROP"],
                     ["-D", "OUTPUT", "-d", self.command_node_ip, "-j", "ACCEPT"],
@@ -308,14 +344,13 @@ class AgentResponseDriver:
                         ["iptables"] + rule,
                         capture_output=True, timeout=5, check=False,
                     )
-                    details["rules_removed"].append(f"{' '.join(rule)} → {r.returncode}")
+                    details["rules_removed"].append(f"{' '.join(rule)} -> {r.returncode}")
             except Exception as exc:
                 details["error"] = str(exc)
-                simulated = True
+                status = "FAILED"
 
         self.is_isolated = False
-        status = "simulated_success" if simulated else "success"
-        res = {"status": status, "message": "Host un-isolated", "details": details}
+        res = {"status": status, "message": "Host un-isolated", "details": details, "simulation": False}
         self.log_action("UNISOLATE_HOST", res)
         return res
 
@@ -337,48 +372,8 @@ class AgentResponseDriver:
         elif action == "ISOLATE_HOST":
             return self.isolate_host()
         elif action == "ALERT":
-            res = {"status": "alert_raised", "verdict": verdict}
+            res = {"status": "EXECUTED", "verdict": verdict}
             self.log_action("ALERT", res)
             return res
         else:
             return self.log_action("LOG", verdict)
-
-
-# ===========================================================================
-# Runnable Demo
-# ===========================================================================
-if __name__ == "__main__":
-    print("=" * 72)
-    print("AEGIS Active Response Enforcement Driver Verification Demo")
-    print("=" * 72)
-
-    driver = AgentResponseDriver()
-
-    # 1. Test Audit Logging
-    print("\n1. Testing LOG action...")
-    driver.execute_verdict_action({
-        "vote_id": "demo01",
-        "response_action": "LOG",
-        "severity": "LOW",
-        "details": {"event": "normal_login"},
-    })
-
-    # 2. Test File Quarantine (creates temporary test file)
-    test_file = Path("scratch/suspicious_sample.exe")
-    test_file.parent.mkdir(parents=True, exist_ok=True)
-    test_file.write_text("MZ test binary sample for AEGIS quarantine")
-
-    print(f"\n2. Testing QUARANTINE_FILE action on '{test_file}'...")
-    res_q = driver.quarantine_file(str(test_file))
-    print(f"   Quarantine Result: {res_q}")
-
-    # 3. Test Host Isolation & Restoration
-    print("\n3. Testing ISOLATE_HOST action...")
-    res_iso = driver.isolate_host()
-    print(f"   Isolation Result: {res_iso}")
-
-    print("\n4. Testing UNISOLATE_HOST action...")
-    res_uniso = driver.unisolate_host()
-    print(f"   Un-isolation Result: {res_uniso}")
-
-    print("=" * 72)

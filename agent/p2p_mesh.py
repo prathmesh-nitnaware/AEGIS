@@ -6,31 +6,38 @@ AEGIS - Layer 2 Peer-to-Peer Consensus Voting Protocol Engine
 Implements a distributed P2P consensus mesh network for monitored endpoint agents.
 
 Architecture & Protocol Overview:
-* **Peer-to-Peer Signal Correlation**: When an endpoint agent detects an anomaly, it
-  broadcasts a `VotingRequest` to peer nodes in the local network mesh.
-* **Correlated Feature Checking**: Receiving peers evaluate their local telemetry buffer
-  to verify if matching correlated signals (e.g., matching network port, host IP, or
-  process hash) were observed within a short time window.
-* **Trust-Weighted Consensus**: Responses (`VotingResponse`) are weighted by the peer's
-  running trust score (via `AgentTrustTracker`) and correlation status:
-    - 2.0x multiplier: Peer observed correlated signal AND high trust (> 0.7)
-    - 1.0x multiplier: Correlated signal with standard trust OR high trust without correlation
-    - 0.5x multiplier: Standard node without direct correlation
-    - 0.3x multiplier: Low trust / unverified node (< 0.4)
-* **Consensus Verdict Aggregation**: Calculates a final weighted threat score and
-  determines the network-wide consensus verdict (LOW / MEDIUM / HIGH / CRITICAL).
+* **Ed25519 Cryptographic Peer Authentication**: Each endpoint agent possesses a
+  persistent Ed25519 keypair. VotingRequest and VotingResponse messages are digitally
+  signed by the emitting node. Receiving peers verify cryptographic signatures before
+  accepting any votes, rejecting messages from forged or unknown identities.
+* **Replay Protection**: Messages include unique vote IDs, random nonces, and unix
+  epoch timestamps. Stale packets (> max_message_age), clock-skewed packets, and
+  previously seen vote IDs/nonces are rejected.
+* **Input Bounds Validation**: Scores (threat, confidence, trust, vote) are strictly
+  enforced within [0.0, 1.0]. Event types are checked against an explicit allowlist.
+  Telemetry details are bounded in size.
+* **Peer Response Deduplication**: A peer can contribute at most ONE response per vote.
+* **Explicit Quorum Model**: Replaces simplistic single-peer checks with configurable
+  quorum rules. Distinguishes NO_QUORUM, PARTIAL_QUORUM, and CONSENSUS_REACHED.
+  Distinguishes LOCAL_EMERGENCY_VERDICT from PEER_CONSENSUS_VERDICT.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import math
+import secrets
 import socket
 import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from agent.confidence_engine import AgentTrustTracker
 
@@ -42,6 +49,63 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
 )
+
+# ---------------------------------------------------------------------------
+# Protocol Constraints & Constants
+# ---------------------------------------------------------------------------
+ALLOWED_EVENT_TYPES = frozenset({
+    "network",
+    "process_linux",
+    "process_windows",
+    "file",
+    "log_line",
+    "windows_event",
+    "zero_day",
+    "sabotage",
+    "ransomware_simulation",
+})
+
+MAX_DETAILS_BYTES = 65536  # 64 KB limit on payload details
+DEFAULT_MAX_MESSAGE_AGE = 30.0  # seconds
+DEFAULT_CLOCK_SKEW_TOLERANCE = 5.0  # seconds
+
+
+# ===========================================================================
+# Cryptographic Identity & Verification Helper
+# ===========================================================================
+class PeerCrypto:
+    """Helper for Ed25519 digital signature signing and verification."""
+
+    @staticmethod
+    def generate_keypair() -> Tuple[ed25519.Ed25519PrivateKey, ed25519.Ed25519PublicKey]:
+        priv = ed25519.Ed25519PrivateKey.generate()
+        return priv, priv.public_key()
+
+    @staticmethod
+    def public_key_to_hex(pub: ed25519.Ed25519PublicKey) -> str:
+        return pub.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        ).hex()
+
+    @staticmethod
+    def public_key_from_hex(hex_str: str) -> ed25519.Ed25519PublicKey:
+        raw = bytes.fromhex(hex_str)
+        return ed25519.Ed25519PublicKey.from_public_bytes(raw)
+
+    @staticmethod
+    def sign_bytes(priv: ed25519.Ed25519PrivateKey, data: bytes) -> str:
+        return priv.sign(data).hex()
+
+    @staticmethod
+    def verify_signature(pub: ed25519.Ed25519PublicKey, data: bytes, sig_hex: str) -> bool:
+        if not sig_hex:
+            return False
+        try:
+            pub.verify(bytes.fromhex(sig_hex), data)
+            return True
+        except (InvalidSignature, ValueError, Exception):
+            return False
 
 
 # ===========================================================================
@@ -59,6 +123,30 @@ class VotingRequest:
     confidence: float
     details: Dict[str, Any] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
+    nonce: str = field(default_factory=lambda: secrets.token_hex(8))
+    sender_public_key: str = ""
+    signature: str = ""
+
+    def canonical_bytes(self) -> bytes:
+        """Deterministic canonical byte serialization for cryptographic signing."""
+        content = {
+            "vote_id": str(self.vote_id),
+            "origin_agent_id": str(self.origin_agent_id),
+            "event_type": str(self.event_type),
+            "threat_score": round(float(self.threat_score), 6),
+            "confidence": round(float(self.confidence), 6),
+            "timestamp": round(float(self.timestamp), 3),
+            "nonce": str(self.nonce),
+        }
+        return json.dumps(content, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    def sign(self, priv_key: ed25519.Ed25519PrivateKey) -> None:
+        """Sign request in-place using private key."""
+        self.signature = PeerCrypto.sign_bytes(priv_key, self.canonical_bytes())
+
+    def verify(self, pub_key: ed25519.Ed25519PublicKey) -> bool:
+        """Verify request signature using public key."""
+        return PeerCrypto.verify_signature(pub_key, self.canonical_bytes(), self.signature)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -66,13 +154,16 @@ class VotingRequest:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> VotingRequest:
         return cls(
-            vote_id=data["vote_id"],
-            origin_agent_id=data["origin_agent_id"],
-            event_type=data["event_type"],
+            vote_id=str(data["vote_id"]),
+            origin_agent_id=str(data["origin_agent_id"]),
+            event_type=str(data["event_type"]),
             threat_score=float(data["threat_score"]),
             confidence=float(data["confidence"]),
             details=data.get("details", {}),
             timestamp=float(data.get("timestamp", time.time())),
+            nonce=str(data.get("nonce", "")),
+            sender_public_key=str(data.get("sender_public_key", "")),
+            signature=str(data.get("signature", "")),
         )
 
 
@@ -87,6 +178,30 @@ class VotingResponse:
     correlated: bool
     peer_vote_score: float
     timestamp: float = field(default_factory=time.time)
+    nonce: str = field(default_factory=lambda: secrets.token_hex(8))
+    sender_public_key: str = ""
+    signature: str = ""
+
+    def canonical_bytes(self) -> bytes:
+        """Deterministic canonical byte serialization for cryptographic signing."""
+        content = {
+            "vote_id": str(self.vote_id),
+            "peer_agent_id": str(self.peer_agent_id),
+            "peer_trust_score": round(float(self.peer_trust_score), 6),
+            "correlated": bool(self.correlated),
+            "peer_vote_score": round(float(self.peer_vote_score), 6),
+            "timestamp": round(float(self.timestamp), 3),
+            "nonce": str(self.nonce),
+        }
+        return json.dumps(content, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    def sign(self, priv_key: ed25519.Ed25519PrivateKey) -> None:
+        """Sign response in-place using private key."""
+        self.signature = PeerCrypto.sign_bytes(priv_key, self.canonical_bytes())
+
+    def verify(self, pub_key: ed25519.Ed25519PublicKey) -> bool:
+        """Verify response signature using public key."""
+        return PeerCrypto.verify_signature(pub_key, self.canonical_bytes(), self.signature)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -94,12 +209,15 @@ class VotingResponse:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> VotingResponse:
         return cls(
-            vote_id=data["vote_id"],
-            peer_agent_id=data["peer_agent_id"],
+            vote_id=str(data["vote_id"]),
+            peer_agent_id=str(data["peer_agent_id"]),
             peer_trust_score=float(data["peer_trust_score"]),
             correlated=bool(data["correlated"]),
             peer_vote_score=float(data["peer_vote_score"]),
             timestamp=float(data.get("timestamp", time.time())),
+            nonce=str(data.get("nonce", "")),
+            sender_public_key=str(data.get("sender_public_key", "")),
+            signature=str(data.get("signature", "")),
         )
 
 
@@ -118,9 +236,100 @@ class ConsensusVerdict:
     participating_peers: int
     total_weight: float
     timestamp: float = field(default_factory=time.time)
+    quorum_status: str = "CONSENSUS_REACHED"  # NO_QUORUM, PARTIAL_QUORUM, CONSENSUS_REACHED
+    verdict_type: str = "PEER_CONSENSUS_VERDICT"  # PEER_CONSENSUS_VERDICT, LOCAL_EMERGENCY_VERDICT, INSUFFICIENT_QUORUM
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+# ===========================================================================
+# Replay Protection Helper
+# ===========================================================================
+class ReplayProtector:
+    """Thread-safe replay protection tracker with LRU expiration."""
+
+    def __init__(self, max_age_seconds: float = DEFAULT_MAX_MESSAGE_AGE, max_entries: int = 10000) -> None:
+        self.max_age_seconds = max_age_seconds
+        self.max_entries = max_entries
+        self._seen: Dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def validate_and_record(self, sender_id: str, nonce: str, msg_timestamp: float) -> bool:
+        """
+        Returns True if the message is fresh and not replayed, False otherwise.
+        """
+        now = time.time()
+        # Freshness / clock skew check
+        if (now - msg_timestamp) > self.max_age_seconds:
+            return False
+        if (msg_timestamp - now) > 60.0:  # Future clock skew > 60s
+            return False
+
+        key = f"{sender_id}:{nonce}"
+        with self._lock:
+            if key in self._seen:
+                return False
+
+            # Cleanup expired entries if size exceeds limit
+            if len(self._seen) >= self.max_entries:
+                cutoff = now - self.max_age_seconds
+                self._seen = {k: ts for k, ts in self._seen.items() if ts > cutoff}
+
+            self._seen[key] = msg_timestamp
+            return True
+
+
+# ===========================================================================
+# Validation Helpers
+# ===========================================================================
+def validate_voting_request(
+    req: VotingRequest,
+    max_age: float = DEFAULT_MAX_MESSAGE_AGE,
+    clock_skew: float = DEFAULT_CLOCK_SKEW_TOLERANCE,
+) -> Tuple[bool, str]:
+    """Validate numerical ranges, event allowlist, details size, and timestamps."""
+    if not (0.0 <= req.threat_score <= 1.0):
+        return False, f"Invalid threat_score: {req.threat_score}. Must be in [0, 1]."
+    if not (0.0 <= req.confidence <= 1.0):
+        return False, f"Invalid confidence: {req.confidence}. Must be in [0, 1]."
+    if req.event_type not in ALLOWED_EVENT_TYPES:
+        return False, f"Invalid event_type '{req.event_type}'. Not in allowlist."
+
+    try:
+        details_bytes = json.dumps(req.details).encode("utf-8")
+        if len(details_bytes) > MAX_DETAILS_BYTES:
+            return False, f"Details size {len(details_bytes)} bytes exceeds max {MAX_DETAILS_BYTES} bytes."
+    except Exception as exc:
+        return False, f"Malformed details payload: {exc}"
+
+    now = time.time()
+    if (now - req.timestamp) > max_age:
+        return False, f"Stale VotingRequest: age {round(now - req.timestamp, 2)}s exceeds max {max_age}s."
+    if (req.timestamp - now) > clock_skew:
+        return False, f"Clock-skewed VotingRequest: timestamp is {round(req.timestamp - now, 2)}s in the future."
+
+    return True, "OK"
+
+
+def validate_voting_response(
+    resp: VotingResponse,
+    max_age: float = DEFAULT_MAX_MESSAGE_AGE,
+    clock_skew: float = DEFAULT_CLOCK_SKEW_TOLERANCE,
+) -> Tuple[bool, str]:
+    """Validate numerical ranges and timestamp freshness for a VotingResponse."""
+    if not (0.0 <= resp.peer_trust_score <= 1.0):
+        return False, f"Invalid peer_trust_score: {resp.peer_trust_score}. Must be in [0, 1]."
+    if not (0.0 <= resp.peer_vote_score <= 1.0):
+        return False, f"Invalid peer_vote_score: {resp.peer_vote_score}. Must be in [0, 1]."
+
+    now = time.time()
+    if (now - resp.timestamp) > max_age:
+        return False, f"Stale VotingResponse: age {round(now - resp.timestamp, 2)}s exceeds max {max_age}s."
+    if (resp.timestamp - now) > clock_skew:
+        return False, f"Clock-skewed VotingResponse: timestamp is {round(resp.timestamp - now, 2)}s in the future."
+
+    return True, "OK"
 
 
 # ===========================================================================
@@ -161,8 +370,6 @@ class PeerCorrelationEngine:
         Returns
         -------
         (is_correlated, suggested_peer_score)
-            is_correlated: bool indicating match found.
-            suggested_peer_score: float score observed locally (or request score if matching).
         """
         now = time.time()
         with self._lock:
@@ -177,21 +384,18 @@ class PeerCorrelationEngine:
                 req_details = req.details
 
                 # Correlation rules across event types:
-                # 1. Network: Matching port, IP, or destination
                 if req.event_type == "network":
                     if (local_details.get("port") and local_details.get("port") == req_details.get("port")) or \
                        (local_details.get("dest_ip") and local_details.get("dest_ip") == req_details.get("dest_ip")):
                         logger.info("[CorrelationEngine] Match found on network details: %s", req_details)
                         return True, req.threat_score
 
-                # 2. Process: Matching process name or PID
                 elif req.event_type in ("process_linux", "process_windows"):
                     if (local_details.get("process") and local_details.get("process") == req_details.get("process")) or \
                        (local_details.get("pid") and local_details.get("pid") == req_details.get("pid")):
                         logger.info("[CorrelationEngine] Match found on process details: %s", req_details)
                         return True, req.threat_score
 
-                # 3. File / Log: Matching filename or template
                 elif req.event_type in ("file", "log_line"):
                     if local_details.get("filename") and local_details.get("filename") == req_details.get("filename"):
                         logger.info("[CorrelationEngine] Match found on file details: %s", req_details)
@@ -205,14 +409,15 @@ class PeerCorrelationEngine:
 # ===========================================================================
 class WeightedConsensusAggregator:
     """
-    Computes weighted consensus verdict from origin request and peer responses.
+    Computes weighted consensus verdict from origin request and peer responses
+    using an explicit quorum model.
     """
 
     @staticmethod
     def calculate_weight(trust_score: float, is_correlated: bool) -> float:
         """
         AEGIS Weight Multiplier Spec:
-        - 2.0x: Correlated AND high trust (> 0.7)
+        - 2.0x: Correlated AND high trust (>= 0.7)
         - 1.0x: Correlated standard trust OR high trust without correlation
         - 0.5x: Standard node without direct correlation
         - 0.3x: Low trust / unverified node (< 0.4)
@@ -244,9 +449,24 @@ class WeightedConsensusAggregator:
         req: VotingRequest,
         responses: List[VotingResponse],
         origin_trust: float = 1.0,
+        expected_peers: Optional[int] = None,
+        min_quorum: Optional[int] = None,
     ) -> ConsensusVerdict:
         """
         Aggregate votes from origin agent and peers into a final ConsensusVerdict.
+
+        Quorum Model:
+        - expected_peers: Total peer nodes in cluster/expected to participate.
+        - min_quorum: Minimum peer responses required to reach consensus.
+          Default: math.ceil((expected_peers + 1) / 2) if expected_peers specified, else 1 if len(responses) > 0.
+        - Quorum States:
+          * NO_QUORUM: 0 peer responses received.
+          * PARTIAL_QUORUM: responses > 0 but < min_quorum.
+          * CONSENSUS_REACHED: responses >= min_quorum.
+        - Verdict Types:
+          * PEER_CONSENSUS_VERDICT: consensus_reached is True.
+          * LOCAL_EMERGENCY_VERDICT: local/critical score without quorum (consensus_reached is False).
+          * INSUFFICIENT_QUORUM: non-critical score without quorum (consensus_reached is False).
         """
         # Origin node counts as origin_trust * 1.5 weight
         origin_weight = origin_trust * 1.5
@@ -260,10 +480,32 @@ class WeightedConsensusAggregator:
 
         final_score = total_weighted_score / total_weight if total_weight > 0 else req.threat_score
         final_score = max(0.0, min(1.0, final_score))
-
         severity = self.determine_severity(final_score)
-        # Consensus is reached if at least 1 peer responded or if severity is CRITICAL
-        consensus_reached = len(responses) > 0 or severity == "CRITICAL"
+
+        # Quorum evaluation
+        num_responses = len(responses)
+        if expected_peers is not None and expected_peers > 0:
+            quorum_needed = min_quorum if min_quorum is not None else max(1, math.ceil((expected_peers + 1) / 2))
+        else:
+            quorum_needed = min_quorum if min_quorum is not None else (1 if num_responses > 0 else 1)
+
+        if num_responses == 0:
+            quorum_status = "NO_QUORUM"
+            consensus_reached = False
+        elif num_responses < quorum_needed:
+            quorum_status = "PARTIAL_QUORUM"
+            consensus_reached = False
+        else:
+            quorum_status = "CONSENSUS_REACHED"
+            consensus_reached = True
+
+        # Distinguish local emergency verdict from distributed peer consensus
+        if consensus_reached:
+            verdict_type = "PEER_CONSENSUS_VERDICT"
+        elif severity == "CRITICAL" or req.threat_score >= 0.80:
+            verdict_type = "LOCAL_EMERGENCY_VERDICT"
+        else:
+            verdict_type = "INSUFFICIENT_QUORUM"
 
         return ConsensusVerdict(
             vote_id=req.vote_id,
@@ -273,8 +515,10 @@ class WeightedConsensusAggregator:
             final_weighted_score=round(final_score, 4),
             severity=severity,
             consensus_reached=consensus_reached,
-            participating_peers=len(responses),
+            participating_peers=num_responses,
             total_weight=round(total_weight, 3),
+            quorum_status=quorum_status,
+            verdict_type=verdict_type,
         )
 
 
@@ -284,7 +528,8 @@ class WeightedConsensusAggregator:
 class P2PMeshNode:
     """
     Distributed peer node for broadcasting requests, listening for votes,
-    and computing consensus over UDP sockets / REST seams.
+    and computing consensus over UDP sockets with Ed25519 peer authentication
+    and replay protection.
 
     Parameters
     ----------
@@ -296,6 +541,14 @@ class P2PMeshNode:
         Persisted sqlite trust tracker instance.
     on_verdict : Callable[[ConsensusVerdict], None], optional
         Callback invoked when a consensus verdict is calculated.
+    private_key : ed25519.Ed25519PrivateKey, optional
+        Persistent Ed25519 private key. If omitted, generates a fresh keypair.
+    min_quorum : int, optional
+        Configurable minimum peer responses for quorum consensus.
+    max_message_age : float
+        Replay protection age limit in seconds (default 30.0).
+    clock_skew_tolerance : float
+        Allowed clock skew in seconds (default 5.0).
     """
 
     def __init__(
@@ -304,17 +557,40 @@ class P2PMeshNode:
         bind_port: int = 9001,
         trust_tracker: Optional[AgentTrustTracker] = None,
         on_verdict: Optional[Callable[[ConsensusVerdict], None]] = None,
+        private_key: Optional[ed25519.Ed25519PrivateKey] = None,
+        min_quorum: Optional[int] = None,
+        max_message_age: float = DEFAULT_MAX_MESSAGE_AGE,
+        clock_skew_tolerance: float = DEFAULT_CLOCK_SKEW_TOLERANCE,
     ) -> None:
         self.agent_id = agent_id
         self.bind_port = bind_port
         self.trust_tracker = trust_tracker or AgentTrustTracker(db_path=f"aegis_trust_{agent_id}.db")
         self.on_verdict = on_verdict or self._default_verdict_handler
 
+        self.min_quorum = min_quorum
+        self.max_message_age = max_message_age
+        self.clock_skew_tolerance = clock_skew_tolerance
+
+        # Cryptographic Identity
+        if private_key is not None:
+            self._private_key = private_key
+            self._public_key = private_key.public_key()
+        else:
+            self._private_key, self._public_key = PeerCrypto.generate_keypair()
+
+        self.public_key_hex = PeerCrypto.public_key_to_hex(self._public_key)
+
         self.correlation_engine = PeerCorrelationEngine()
         self.aggregator = WeightedConsensusAggregator()
 
         self._peers: Dict[str, Tuple[str, int]] = {}  # agent_id -> (host, port)
+        self._peer_keys: Dict[str, ed25519.Ed25519PublicKey] = {}  # agent_id -> Ed25519PublicKey
         self._active_votes: Dict[str, Dict[str, Any]] = {}  # vote_id -> tracking dict
+
+        # Replay & Deduplication protection structures
+        self._seen_messages: Dict[str, float] = {}  # message/nonce/vote_id -> timestamp
+        self._peer_responses_per_vote: Dict[str, Set[str]] = {}  # vote_id -> set of peer_ids who voted
+
         self._lock = threading.Lock()
 
         self._socket: Optional[socket.socket] = None
@@ -325,22 +601,37 @@ class P2PMeshNode:
     @staticmethod
     def _default_verdict_handler(verdict: ConsensusVerdict) -> None:
         logger.info(
-            "[P2PMesh] CONSENSUS VERDICT: vote_id=%s agent=%s severity=%s (score=%.4f, peers=%d)",
+            "[P2PMesh] CONSENSUS VERDICT: vote_id=%s agent=%s severity=%s (score=%.4f, peers=%d, quorum=%s, type=%s)",
             verdict.vote_id,
             verdict.origin_agent_id,
             verdict.severity,
             verdict.final_weighted_score,
             verdict.participating_peers,
+            verdict.quorum_status,
+            verdict.verdict_type,
         )
 
-    def register_peer(self, peer_agent_id: str, host: str, port: int) -> None:
-        """Register a known peer agent address."""
+    def register_peer(
+        self,
+        peer_agent_id: str,
+        host: str,
+        port: int,
+        public_key_hex: Optional[str] = None,
+    ) -> None:
+        """
+        Register a known peer agent address and its Ed25519 public key.
+        """
         with self._lock:
             self._peers[peer_agent_id] = (host, port)
-            logger.info("[P2PMesh] Registered peer '%s' at %s:%d", peer_agent_id, host, port)
+            if public_key_hex:
+                try:
+                    self._peer_keys[peer_agent_id] = PeerCrypto.public_key_from_hex(public_key_hex)
+                except Exception as exc:
+                    logger.warning("[P2PMesh] Failed to parse public key for peer '%s': %s", peer_agent_id, exc)
+            logger.info("[P2PMesh] Registered peer '%s' at %s:%d (has_key=%s)", peer_agent_id, host, port, peer_agent_id in self._peer_keys)
 
     def evaluate_incoming_request(self, req: VotingRequest) -> VotingResponse:
-        """Evaluate an incoming request from a peer node."""
+        """Evaluate an incoming request from a peer node and sign the response."""
         correlated, suggested_score = self.correlation_engine.check_correlation(req)
         local_trust = self.trust_tracker.get_trust(self.agent_id)
 
@@ -350,8 +641,18 @@ class P2PMeshNode:
             peer_trust_score=local_trust,
             correlated=correlated,
             peer_vote_score=suggested_score,
+            timestamp=time.time(),
+            sender_public_key=self.public_key_hex,
         )
+        resp.sign(self._private_key)
         return resp
+
+    def _clean_replay_cache(self, now: float) -> None:
+        """Evict expired entries from replay cache."""
+        cutoff = now - (self.max_message_age * 2)
+        expired = [k for k, ts in self._seen_messages.items() if ts < cutoff]
+        for k in expired:
+            self._seen_messages.pop(k, None)
 
     def initiate_vote(
         self,
@@ -364,8 +665,8 @@ class P2PMeshNode:
         """
         Initiate a network-wide consensus voting process for an anomaly.
 
-        Broadcasts `VotingRequest` to registered peers, waits up to `timeout`
-        seconds for responses, aggregates results, and returns `ConsensusVerdict`.
+        Broadcasts signed `VotingRequest` to registered peers, waits up to `timeout`
+        seconds for responses, aggregates results with explicit quorum, and returns `ConsensusVerdict`.
         """
         vote_id = str(uuid.uuid4())[:8]
         req = VotingRequest(
@@ -375,24 +676,32 @@ class P2PMeshNode:
             threat_score=threat_score,
             confidence=confidence,
             details=details,
+            timestamp=time.time(),
+            sender_public_key=self.public_key_hex,
         )
+        req.sign(self._private_key)
 
         responses: List[VotingResponse] = []
         response_event = threading.Event()
 
         with self._lock:
+            expected_peers = len(self._peers)
             self._active_votes[vote_id] = {
                 "request": req,
                 "responses": responses,
                 "event": response_event,
-                "expected_peers": len(self._peers),
+                "expected_peers": expected_peers,
+                "start_time": time.time(),
             }
+            self._peer_responses_per_vote[vote_id] = set()
+            self._seen_messages[vote_id] = req.timestamp
+            if req.nonce:
+                self._seen_messages[req.nonce] = req.timestamp
 
-        # Broadcast payload over socket if available, otherwise direct evaluation
-        payload_bytes = json.dumps({"type": "VOTE_REQUEST", "data": req.to_dict()}).encode("utf-8")
-
-        with self._lock:
             peer_list = list(self._peers.values())
+
+        # Broadcast signed payload over socket
+        payload_bytes = json.dumps({"type": "VOTE_REQUEST", "data": req.to_dict()}).encode("utf-8")
 
         if self._socket and peer_list:
             for host, port in peer_list:
@@ -407,9 +716,16 @@ class P2PMeshNode:
         with self._lock:
             vote_data = self._active_votes.pop(vote_id, None)
             collected_responses = vote_data["responses"] if vote_data else responses
+            self._peer_responses_per_vote.pop(vote_id, None)
 
         origin_trust = self.trust_tracker.get_trust(self.agent_id)
-        verdict = self.aggregator.aggregate(req, collected_responses, origin_trust=origin_trust)
+        verdict = self.aggregator.aggregate(
+            req,
+            collected_responses,
+            origin_trust=origin_trust,
+            expected_peers=expected_peers,
+            min_quorum=self.min_quorum,
+        )
 
         try:
             self.on_verdict(verdict)
@@ -419,18 +735,68 @@ class P2PMeshNode:
         return verdict
 
     def _handle_received_message(self, raw_bytes: bytes, sender_addr: Tuple[str, int]) -> None:
-        """Parse and process an incoming UDP socket message."""
+        """Parse, cryptographically verify, validate, and process incoming UDP message."""
+        now = time.time()
         try:
             msg = json.loads(raw_bytes.decode("utf-8"))
             msg_type = msg.get("type")
             data = msg.get("data", {})
 
+            with self._lock:
+                self._clean_replay_cache(now)
+
             if msg_type == "VOTE_REQUEST":
                 req = VotingRequest.from_dict(data)
-                # Ignore self requests
+
+                # 1. Ignore self requests
                 if req.origin_agent_id == self.agent_id:
                     return
 
+                # 2. Replay check
+                with self._lock:
+                    if req.vote_id in self._seen_messages or (req.nonce and req.nonce in self._seen_messages):
+                        logger.warning("[P2PMesh] Replay detected for vote_id=%s nonce=%s. Rejecting packet.", req.vote_id, req.nonce)
+                        return
+                    self._seen_messages[req.vote_id] = req.timestamp
+                    if req.nonce:
+                        self._seen_messages[req.nonce] = req.timestamp
+
+                # 3. Payload validation
+                valid, reason = validate_voting_request(
+                    req, max_age=self.max_message_age, clock_skew=self.clock_skew_tolerance
+                )
+                if not valid:
+                    logger.warning("[P2PMesh] Invalid VotingRequest from %s: %s", req.origin_agent_id, reason)
+                    return
+
+                # 4. Cryptographic signature and identity verification
+                with self._lock:
+                    peer_key = self._peer_keys.get(req.origin_agent_id)
+                    is_registered = req.origin_agent_id in self._peers
+
+                if not is_registered:
+                    logger.warning("[P2PMesh] Rejecting VotingRequest from unknown peer identity: %s", req.origin_agent_id)
+                    return
+
+                # If peer is registered but public key was not pre-shared, bind from valid signed request
+                if not peer_key and req.sender_public_key:
+                    try:
+                        peer_key = PeerCrypto.public_key_from_hex(req.sender_public_key)
+                        with self._lock:
+                            self._peer_keys[req.origin_agent_id] = peer_key
+                    except Exception as exc:
+                        logger.warning("[P2PMesh] Failed to decode sender_public_key from '%s': %s", req.origin_agent_id, exc)
+                        return
+
+                if peer_key:
+                    if not req.verify(peer_key):
+                        logger.warning("[P2PMesh] Signature verification FAILED for peer '%s' (vote_id=%s)", req.origin_agent_id, req.vote_id)
+                        return
+                else:
+                    logger.warning("[P2PMesh] Cannot verify signature: no public key available for peer '%s'", req.origin_agent_id)
+                    return
+
+                # 5. Evaluate and reply with signed VotingResponse
                 resp = self.evaluate_incoming_request(req)
                 resp_payload = json.dumps({"type": "VOTE_RESPONSE", "data": resp.to_dict()}).encode("utf-8")
                 if self._socket:
@@ -438,15 +804,70 @@ class P2PMeshNode:
 
             elif msg_type == "VOTE_RESPONSE":
                 resp = VotingResponse.from_dict(data)
+
+                # 1. Check if vote is active
                 with self._lock:
                     vote_entry = self._active_votes.get(resp.vote_id)
+                    if not vote_entry:
+                        logger.debug("[P2PMesh] Received VotingResponse for inactive/expired vote_id=%s from %s", resp.vote_id, resp.peer_agent_id)
+                        return
+
+                    # 2. Reject duplicate response from the SAME peer for this vote
+                    peers_voted = self._peer_responses_per_vote.setdefault(resp.vote_id, set())
+                    if resp.peer_agent_id in peers_voted:
+                        logger.warning("[P2PMesh] Duplicate VotingResponse from peer '%s' for vote_id=%s. Rejecting.", resp.peer_agent_id, resp.vote_id)
+                        return
+
+                    peer_key = self._peer_keys.get(resp.peer_agent_id)
+                    is_registered = resp.peer_agent_id in self._peers
+
+                # 3. Check registered peer identity
+                if not is_registered:
+                    logger.warning("[P2PMesh] Rejecting VotingResponse from unknown peer identity: %s", resp.peer_agent_id)
+                    return
+
+                # If peer is registered but public key was not pre-shared, bind from response
+                if not peer_key and resp.sender_public_key:
+                    try:
+                        peer_key = PeerCrypto.public_key_from_hex(resp.sender_public_key)
+                        with self._lock:
+                            self._peer_keys[resp.peer_agent_id] = peer_key
+                    except Exception as exc:
+                        logger.warning("[P2PMesh] Failed to decode sender_public_key from '%s': %s", resp.peer_agent_id, exc)
+                        return
+
+                # 4. Cryptographic signature verification
+                if peer_key:
+                    if not resp.verify(peer_key):
+                        logger.warning("[P2PMesh] Response signature verification FAILED for peer '%s' (vote_id=%s)", resp.peer_agent_id, resp.vote_id)
+                        return
+                else:
+                    logger.warning("[P2PMesh] Cannot verify signature: no public key available for peer '%s'", resp.peer_agent_id)
+                    return
+
+                # 5. Validate response ranges & freshness
+                valid, reason = validate_voting_response(
+                    resp, max_age=self.max_message_age, clock_skew=self.clock_skew_tolerance
+                )
+                if not valid:
+                    logger.warning("[P2PMesh] Invalid VotingResponse from %s: %s", resp.peer_agent_id, reason)
+                    return
+
+                # 6. Record response
+                with self._lock:
+                    # Double-check vote entry still active
+                    vote_entry = self._active_votes.get(resp.vote_id)
                     if vote_entry:
+                        peers_voted = self._peer_responses_per_vote.setdefault(resp.vote_id, set())
+                        peers_voted.add(resp.peer_agent_id)
                         vote_entry["responses"].append(resp)
+
+                        # Trigger completion if expected peers arrived
                         if len(vote_entry["responses"]) >= vote_entry["expected_peers"]:
                             vote_entry["event"].set()
 
         except Exception as exc:
-            logger.warning("[P2PMesh] Error handling socket packet: %s", exc)
+            logger.warning("[P2PMesh] Error handling socket packet from %s: %s", sender_addr, exc)
 
     def _listen_loop(self) -> None:
         """Background UDP socket listener thread."""
@@ -503,56 +924,3 @@ class P2PMeshNode:
 
         self._is_running = False
         logger.info("[P2PMesh] Node '%s' stopped.", self.agent_id)
-
-
-# ===========================================================================
-# Demo Runnable
-# ===========================================================================
-if __name__ == "__main__":
-    print("=" * 72)
-    print("AEGIS Layer 2 — P2P Mesh Consensus Voting Verification Demo")
-    print("=" * 72)
-
-    # 1. Instantiate 3 P2P Mesh Nodes
-    node1 = P2PMeshNode(agent_id="node-1", bind_port=9101)
-    node2 = P2PMeshNode(agent_id="node-2", bind_port=9102)
-    node3 = P2PMeshNode(agent_id="node-3", bind_port=9103)
-
-    node1.start()
-    node2.start()
-    node3.start()
-
-    # 2. Register mesh topology
-    node1.register_peer("node-2", "127.0.0.1", 9102)
-    node1.register_peer("node-3", "127.0.0.1", 9103)
-
-    node2.register_peer("node-1", "127.0.0.1", 9101)
-    node3.register_peer("node-1", "127.0.0.1", 9101)
-
-    # Pre-record a correlated event on node 2
-    node2.correlation_engine.record_local_event(
-        event_type="network",
-        details={"port": 443, "dest_ip": "192.168.1.100"},
-    )
-
-    print("\n[Demo] Initiating voting from node-1 for a network anomaly (score=0.85, port=443)...")
-    verdict = node1.initiate_vote(
-        event_type="network",
-        threat_score=0.85,
-        confidence=0.90,
-        details={"port": 443, "dest_ip": "192.168.1.100"},
-        timeout=1.5,
-    )
-
-    print(f"\n[Demo] Verdict Received:")
-    print(f"  Vote ID            : {verdict.vote_id}")
-    print(f"  Raw Score          : {verdict.raw_threat_score}")
-    print(f"  Final Weighted Score: {verdict.final_weighted_score}")
-    print(f"  Severity           : {verdict.severity}")
-    print(f"  Peers Participated : {verdict.participating_peers}")
-    print(f"  Total Weight       : {verdict.total_weight}")
-
-    node1.stop()
-    node2.stop()
-    node3.stop()
-    print("=" * 72)

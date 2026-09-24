@@ -135,24 +135,50 @@ class RBACAuthService:
         self._agent_tokens[agent_id] = agent_data
         return agent_data
 
+    def register_agent_token(self, agent_id: str, token: str, cluster_id: str = "cluster-alpha") -> Dict[str, Any]:
+        """Explicitly registers or updates a pre-shared token for an agent."""
+        agent_data = {
+            "agent_id": agent_id,
+            "cluster_id": cluster_id,
+            "token": token,
+            "secret": secrets.token_hex(32),
+            "issued_at": time.time(),
+            "status": "ACTIVE"
+        }
+        self._agent_tokens[agent_id] = agent_data
+        return agent_data
+
     def verify_agent_token(self, agent_id: str, token: str) -> bool:
-        """Verifies agent token matching stored key."""
+        """Verifies agent token matching stored key strictly. No unauthenticated fallbacks."""
+        if not agent_id or not token:
+            return False
         entry = self._agent_tokens.get(agent_id)
         if not entry:
-            # Default allowlist fallback for demo/pre-configured agents
-            return token.startswith("aegis-agent-") or token == "default-swarm-token"
+            return False
         return hmac.compare_digest(entry.get("token", ""), token)
 
     def _seed_default_accounts(self) -> None:
-        """Seeds default operator accounts."""
+        """Seeds default operator accounts and agent identities."""
         self.register_user("admin", "aegis@admin2026", role="admin", full_name="SOC Commander")
         self.register_user("analyst", "analyst@aegis2026", role="analyst", full_name="Lead SOC Analyst")
         self.register_user("auditor", "auditor@aegis2026", role="auditor", full_name="Compliance Auditor")
 
-        # Seed default agent tokens
+        # Seed demo account aliases for dashboard preset compatibility
+        self.register_user("admin_preset", "admin123", role="admin", full_name="SOC Commander (Preset)")
+        self.register_user("analyst_preset", "analyst123", role="analyst", full_name="Lead Analyst (Preset)")
+        self.register_user("auditor_preset", "auditor123", role="auditor", full_name="Auditor (Preset)")
+
+        # Seed pre-configured agent tokens
         self.generate_agent_key("endpoint-linux")
         self.generate_agent_key("endpoint-windows")
         self.generate_agent_key("srv-primary")
+        self.generate_agent_key("vm1")
+        self.generate_agent_key("vm2")
+        self.generate_agent_key("vm3")
+        self.generate_agent_key("node-1")
+        self.generate_agent_key("node-2")
+        self.generate_agent_key("node-3")
+        self.generate_agent_key("test-agent-01")
 
 
 # Global singleton instance

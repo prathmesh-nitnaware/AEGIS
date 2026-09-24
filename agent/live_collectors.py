@@ -25,6 +25,7 @@ collector's output straight into the matching score_*() call.
 """
 from __future__ import annotations
 
+import logging
 import os
 import platform
 import re
@@ -40,7 +41,14 @@ import psutil
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
-import ember_features  # local module -- lief-based EMBER extractor (agent/ember_features.py)
+try:
+    import ember_features  # local module -- lief-based EMBER extractor (agent/ember_features.py)
+except ImportError:
+    from agent import ember_features
+
+from agent.collectors.collector_health import collector_registry
+
+logger = logging.getLogger("aegis.collectors")
 
 IS_LINUX = platform.system() == "Linux"
 IS_WINDOWS = platform.system() == "Windows"
@@ -100,6 +108,7 @@ class LinuxSyscallCollector:
         self._lock = threading.Lock()
         self._proc: Optional[subprocess.Popen] = None
         self._stop = threading.Event()
+        collector_registry.register("linux_syscall")
 
     def start(self, target_pid: Optional[int] = None):
         """
@@ -109,12 +118,14 @@ class LinuxSyscallCollector:
         a real system-wide capture use auditd instead (see note below).
         """
         if not IS_LINUX:
+            collector_registry.record_error("linux_syscall", "LinuxSyscallCollector only runs on Linux.")
             raise RuntimeError("LinuxSyscallCollector only runs on Linux.")
 
         cmd = ["strace", "-f", "-tt"]
         if target_pid:
             cmd += ["-p", str(target_pid)]
         else:
+            collector_registry.record_error("linux_syscall", "System-wide syscall tracing requires auditd/eBPF.")
             raise ValueError(
                 "System-wide syscall tracing needs auditd, not strace -- "
                 "pass a specific target_pid, or swap this for an auditd/eBPF "
@@ -142,11 +153,16 @@ class LinuxSyscallCollector:
             num = self.SYSCALL_NUM_MAP.get(syscall_name, self.UNKNOWN_SYSCALL_NUM)
             with self._lock:
                 self._buffers[pid].append(num)
+            collector_registry.record_success("linux_syscall", 1)
 
     def get_sequence(self, pid: int) -> List[int]:
         """Return the current buffered syscall sequence (ints) for a PID."""
         with self._lock:
             return list(self._buffers.get(pid, []))
+
+    def get_health(self) -> Optional[Dict[str, Any]]:
+        """Return collector health snapshot."""
+        return collector_registry.get_status("linux_syscall")
 
     def stop(self):
         self._stop.set()
@@ -188,9 +204,11 @@ class WindowsAPICollector:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self.on_sysmon_event = on_sysmon_event
+        collector_registry.register("windows_api")
 
     def start(self):
         if not IS_WINDOWS:
+            collector_registry.record_error("windows_api", "WindowsAPICollector only runs on Windows.")
             raise RuntimeError("WindowsAPICollector only runs on Windows.")
         threading.Thread(target=self._poll_loop, daemon=True).start()
 
@@ -205,6 +223,8 @@ class WindowsAPICollector:
             try:
                 hand = win32evtlog.OpenEventLog(server, log_type)
                 events = win32evtlog.ReadEventLog(hand, flags, 0)
+                if events:
+                    collector_registry.record_success("windows_api", len(events))
                 for ev in events:
                     # Event ID 1: Process Create
                     if ev.EventID == 1 and ev.StringInserts and len(ev.StringInserts) > 11:
@@ -277,14 +297,19 @@ class WindowsAPICollector:
                             self.on_sysmon_event(event_data)
 
                 win32evtlog.CloseEventLog(hand)
-            except Exception:
-                pass  # log & continue in production; kept minimal here
+            except Exception as exc:
+                logger.warning("[windows_api_collector] Error polling Sysmon event log: %s", exc)
+                collector_registry.record_error("windows_api", str(exc))
             time.sleep(2)
 
     def get_sequence(self, pid: int) -> List[str]:
         """Return the current buffered API/DLL token sequence for a PID."""
         with self._lock:
             return list(self._buffers.get(pid, []))
+
+    def get_health(self) -> Optional[Dict[str, Any]]:
+        """Return collector health snapshot."""
+        return collector_registry.get_status("windows_api")
 
     def get_active_pids(self) -> List[int]:
         """Return a list of PIDs currently present in the buffer."""
@@ -328,6 +353,7 @@ class NetworkFlowCollector:
     def __init__(self):
         self._flow_start: Dict[tuple, float] = {}
         self._flow_bytes: Dict[tuple, list] = defaultdict(list)
+        collector_registry.register("network_flow")
 
     def poll_once(self) -> List[Dict[str, float]]:
         """
@@ -338,7 +364,9 @@ class NetworkFlowCollector:
         flows = []
         try:
             conns = psutil.net_connections(kind="inet")
-        except (psutil.AccessDenied, PermissionError):
+        except (psutil.AccessDenied, PermissionError) as exc:
+            logger.warning("[network_flow_collector] Access denied enumerating network connections: %s", exc)
+            collector_registry.record_error("network_flow", str(exc))
             return flows
 
         now = time.time()
@@ -353,7 +381,13 @@ class NetworkFlowCollector:
                 "Destination Port": float(c.raddr.port),
                 "Flow Duration": float(duration_ms),
             })
+        if flows:
+            collector_registry.record_success("network_flow", len(flows))
         return flows
+
+    def get_health(self) -> Optional[Dict[str, Any]]:
+        """Return collector health snapshot."""
+        return collector_registry.get_status("network_flow")
 
 
 # ===========================================================================
@@ -408,6 +442,7 @@ class PEFileCollector(FileSystemEventHandler):
         self._feature_names = feature_names or ember_features.FEATURE_NAMES
         self._debounce_seconds = debounce_seconds
         self._last_scanned: Dict[str, float] = {}
+        collector_registry.register("pe_file")
 
     def _wait_until_stable(self, path: str) -> bool:
         deadline = time.time() + self.STABILIZE_MAX_WAIT
@@ -446,26 +481,34 @@ class PEFileCollector(FileSystemEventHandler):
         self._last_scanned[path] = now
 
         if not self._wait_until_stable(path):
-            print(f"[ember_collector] Skipped (file never stabilised): {path}")
+            logger.info("[ember_collector] Skipped (file never stabilised): %s", path)
             return
         try:
             vector, meta = ember_features.extract_from_path(path)
-        except ValueError:
-            print(f"[ember_collector] Skipped (not a valid PE): {path}")
+        except ValueError as exc:
+            logger.debug("[ember_collector] Skipped (not a valid PE): %s (%s)", path, exc)
             return
         except Exception as exc:
-            print(f"[ember_collector] Failed to extract features from {path}: {exc}")
+            logger.error("[ember_collector] Failed to extract features from %s: %s", path, exc)
+            collector_registry.record_error("pe_file", f"Failed to extract features from {path}: {exc}")
             return
 
         if len(vector) != len(self._feature_names):
-            print(
-                f"[ember_collector] WARNING: extracted {len(vector)} features but "
-                f"model expects {len(self._feature_names)} -- names will misalign. "
-                f"Run diagnostics/check_ember_feature_alignment.py before trusting scores."
+            logger.warning(
+                "[ember_collector] WARNING: extracted %d features but "
+                "model expects %d -- names will misalign. "
+                "Run diagnostics/check_ember_feature_alignment.py before trusting scores.",
+                len(vector),
+                len(self._feature_names),
             )
         pe_features = dict(zip(self._feature_names, vector))
         meta["file_path"] = path
+        collector_registry.record_success("pe_file", 1)
         self._callback(pe_features, meta)
+
+    def get_health(self) -> Optional[Dict[str, Any]]:
+        """Return collector health snapshot."""
+        return collector_registry.get_status("pe_file")
 
     @staticmethod
     def _as_str(path: Union[str, bytes]) -> str:
@@ -517,6 +560,7 @@ class HDFSLogCollector(FileSystemEventHandler):
         self._lock = threading.Lock()
         self._offsets: Dict[str, int] = {}
         self._stop = threading.Event()
+        collector_registry.register("hdfs_log")
 
     def _ingest_line(self, line: str):
         m = self.BLOCK_ID_RE.search(line)
@@ -536,6 +580,7 @@ class HDFSLogCollector(FileSystemEventHandler):
         if lines:
             # Block-level concatenated text -- this is the "raw_text" that
             # goes straight into ThreatFusionEngine.score_log_line().
+            collector_registry.record_success("hdfs_log", 1)
             self._callback(" ".join(lines))
 
     def _timeout_flush_loop(self):
@@ -553,6 +598,10 @@ class HDFSLogCollector(FileSystemEventHandler):
     def start_flush_thread(self):
         threading.Thread(target=self._timeout_flush_loop, daemon=True).start()
 
+    def get_health(self) -> Optional[Dict[str, Any]]:
+        """Return collector health snapshot."""
+        return collector_registry.get_status("hdfs_log")
+
     def stop(self):
         self._stop.set()
 
@@ -569,7 +618,8 @@ class HDFSLogCollector(FileSystemEventHandler):
             for line in new_lines:
                 self._ingest_line(line)
         except Exception as exc:
-            print(f"[hdfs_collector] Error tailing {path}: {exc}")
+            logger.error("[hdfs_collector] Error tailing %s: %s", path, exc)
+            collector_registry.record_error("hdfs_log", str(exc))
 
 
 # ===========================================================================
@@ -595,6 +645,7 @@ class ZeroDayEventCollector:
         self._callback = on_event
         self._seen_pids: set = set(psutil.pids()) if seed_initial else set()
         self._stop = threading.Event()
+        collector_registry.register("zero_day")
 
     def start(self, poll_interval: float = 2.0):
         threading.Thread(
@@ -621,13 +672,19 @@ class ZeroDayEventCollector:
                         except (psutil.AccessDenied, psutil.ZombieProcess):
                             pass
                         event_id = "4688" if IS_WINDOWS else "PROC_CREATE"
+                        collector_registry.record_success("zero_day", 1)
                         self._callback(event_id, process_name, user_name, ip)
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         continue
                 self._seen_pids = current_pids
             except Exception as exc:
-                print(f"[zeroday_collector] Poll error: {exc}")
+                logger.error("[zeroday_collector] Poll error: %s", exc)
+                collector_registry.record_error("zero_day", str(exc))
             time.sleep(poll_interval)
+
+    def get_health(self) -> Optional[Dict[str, Any]]:
+        """Return collector health snapshot."""
+        return collector_registry.get_status("zero_day")
 
     def stop(self):
         self._stop.set()

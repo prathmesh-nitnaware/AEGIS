@@ -7,9 +7,8 @@
 
 ## 📅 Status Overview
 - **Repository:** [AEGIS](https://github.com/prathmesh-nitnaware/AEGIS)
-- **Current Phase:** **All Core Phases (1–5) + Advanced Subsystems Implemented & Verified** ✅
-- **Test Suite Status:** **180+ Tests Passing** (`pytest tests/`)
-- **Primary Tech Stack:** Python 3.10–3.14 (FastAPI, Scapy, PyZMQ, XGBoost, LightGBM, PyTorch, ReportLab), React 19 + Vite 8, Docker & Docker Compose, NeonDB PostgreSQL + SQLite
+- **Test Suite Status:** **285 Tests Passing** (8 skipped, 0 failing across 293 total tests via `pytest tests/`)
+- **Primary Tech Stack:** Python 3.10–3.14 (FastAPI, Scapy, PyZMQ, XGBoost, LightGBM, PyTorch, ReportLab, Cryptography), React 19 + Vite 8, Docker & Docker Compose, NeonDB PostgreSQL + SQLite
 
 ---
 

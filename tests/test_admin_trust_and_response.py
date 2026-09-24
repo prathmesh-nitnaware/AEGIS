@@ -84,12 +84,12 @@ class TestAgentResponseDriver:
         driver = AgentResponseDriver(audit_log_path=str(audit_file))
 
         res = driver.log_action("LOG", {"event": "test_event"})
-        assert res["status"] == "success"
+        assert res["status"] in ("success", "EXECUTED")
         assert audit_file.exists()
 
     def test_quarantine_file(self, tmp_path):
         q_dir = tmp_path / "quarantine"
-        driver = AgentResponseDriver(quarantine_dir=str(q_dir))
+        driver = AgentResponseDriver(quarantine_dir=str(q_dir), response_mode="real")
 
         sample_file = tmp_path / "malicious.exe"
         sample_file.write_text("MZ malware payload")
@@ -97,18 +97,18 @@ class TestAgentResponseDriver:
         assert sample_file.exists()
 
         res = driver.quarantine_file(str(sample_file))
-        assert res["status"] == "success"
+        assert res["status"] in ("success", "EXECUTED")
         assert not sample_file.exists()
         assert Path(res["quarantine_path"]).exists()
 
     def test_isolate_host_and_unisolate(self, tmp_path):
-        driver = AgentResponseDriver()
+        driver = AgentResponseDriver(response_mode="simulation")
         res_iso = driver.isolate_host()
-        assert res_iso["status"] in ("success", "simulated_success")
+        assert res_iso["status"] in ("success", "simulated_success", "EXECUTED", "SIMULATED")
         assert driver.is_isolated is True
 
         res_uniso = driver.unisolate_host()
-        assert res_uniso["status"] == "success"
+        assert res_uniso["status"] in ("success", "simulated_success", "EXECUTED", "SIMULATED")
         assert driver.is_isolated is False
 
 
@@ -119,24 +119,30 @@ class TestMaintenancePortalFastAPIEndpoints:
     def client(self):
         return TestClient(app)
 
-    def test_schedule_and_list_maintenance_windows(self, client):
+    @pytest.fixture
+    def admin_headers(self):
+        from backend.services.rbac_auth_service import rbac_auth_service
+        auth = rbac_auth_service.authenticate_user("admin", "aegis@admin2026")
+        return {"Authorization": f"Bearer {auth['token']}"}
+
+    def test_schedule_and_list_maintenance_windows(self, client, admin_headers):
         payload = {
             "agent_id": "vm1",
             "duration_seconds": 600,
             "approved_by": "admin_unit_test",
             "reason": "Pytest Maintenance Window",
         }
-        res_sched = client.post("/api/maintenance/schedule", json=payload)
+        res_sched = client.post("/api/maintenance/schedule", json=payload, headers=admin_headers)
         assert res_sched.status_code == 200
         sched_data = res_sched.json()
         assert sched_data["status"] == "scheduled"
         window_id = sched_data["window"]["window_id"]
 
-        res_list = client.get("/api/maintenance/windows")
+        res_list = client.get("/api/maintenance/windows", headers=admin_headers)
         assert res_list.status_code == 200
         windows = res_list.json()["windows"]
         assert any(w["window_id"] == window_id for w in windows)
 
-        res_cancel = client.delete(f"/api/maintenance/cancel?window_id={window_id}")
+        res_cancel = client.delete(f"/api/maintenance/cancel?window_id={window_id}", headers=admin_headers)
         assert res_cancel.status_code == 200
         assert res_cancel.json()["status"] == "cancelled"

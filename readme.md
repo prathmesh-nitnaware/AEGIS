@@ -3,7 +3,7 @@
 **Adaptive Edge Guardian with Intelligence Swarm**  
 *Distributed Endpoint Detection & Response (EDR) with Peer-Consensus Voting, Explainable AI, PCAP Flow Replayer, and Standalone Adversary C2*
 
-[![Tests](https://img.shields.io/badge/tests-260%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-285%20passing-brightgreen)](#testing)
 [![Completion](https://img.shields.io/badge/overall-100%25%20complete-brightgreen)](#project-status)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 
@@ -11,7 +11,9 @@
 
 ## 🛡️ Overview
 
-Project AEGIS is a **distributed, multi-tier EDR and autonomous threat mitigation ecosystem** combining **6 Machine Learning detection engines**, a **decentralized Byzantine peer-consensus voting protocol**, an **Explainable AI (XAI) SHAP attribution engine**, a **Live PCAP Network Threat Replayer**, an **Enterprise SIEM & SOC Alert Dispatcher**, an **Automated 5-Phase Red vs. Blue Live Battle Campaign Orchestrator**, a **Live Multi-Node P2P Swarm Simulation Harness**, **Kernel-Level eBPF/ETW Telemetry Collectors**, **Community Sigma & In-Memory YARA Threat Engines**, **High-Throughput 50k+ ev/s Stress Profilers**, **GenAI Incident Investigation Copilot & Remediation Playbooks**, **STIX 2.1 / TAXII & MISP Threat Intel Feed Ingestion**, **Enterprise Role-Based Access Control (RBAC)**, **Centralized Fleet Auto-Updates with Ed25519 Cryptographic Verification**, and **MITRE ATT&CK / ISO 27001 / NIST CSF Compliance Reporting**. Every node acts as both a **real-time sensor** and a **quorum voter** — preventing single-agent compromise or false positives from triggering disruptive remediation actions.
+Project AEGIS is a **distributed, multi-tier EDR and autonomous threat mitigation ecosystem** combining **6 Machine Learning detection engines**, a **weighted peer-consensus quorum protocol with Ed25519 digital signatures and anti-replay verification**, an **Explainable AI (XAI) SHAP attribution engine**, a **Live PCAP Network Threat Replayer**, an **Enterprise SIEM & SOC Alert Dispatcher**, an **Automated 5-Phase Red vs. Blue Live Battle Campaign Orchestrator**, a **Live Multi-Node P2P Swarm Simulation Harness**, **Kernel-Level eBPF/ETW Telemetry Collectors**, **Community Sigma & In-Memory YARA Threat Engines**, **High-Throughput 50k+ ev/s Stress Profilers**, **GenAI Incident Investigation Copilot & Remediation Playbooks**, **STIX 2.1 / TAXII & MISP Threat Intel Feed Ingestion**, **Enterprise Role-Based Access Control (RBAC)**, **Centralized Fleet Auto-Updates with Ed25519 Cryptographic Verification**, and **MITRE ATT&CK / ISO 27001 / NIST CSF Compliance Reporting**. Every node acts as both a **real-time sensor** and a **quorum voter** — preventing single-agent compromise or false positives from triggering disruptive remediation actions.
+
+> **Consensus Architecture Note:** AEGIS consensus utilizes a trust-weighted peer quorum aggregator with Ed25519 asymmetric message signatures, timestamp and nonce replay caches, and multi-threshold agreement tiers (`NO_QUORUM`, `PARTIAL_QUORUM`, `CONSENSUS_REACHED`). While resilient to minority poisoned votes, it is an EDR weighted quorum model rather than formal Byzantine state-machine replication (PBFT/Raft).
 
 AEGIS features a **dual-dashboard operational architecture**:
 1. **Blue Team SOC Defender Dashboard (`:5173`)**: Centralized command node monitoring, live telemetry streams, fleet trust tracking, MITRE ATT&CK heatmap, automated benchmark suites, and executive PDF compliance reports.
@@ -23,18 +25,18 @@ AEGIS features a **dual-dashboard operational architecture**:
 
 | Area / Subsystem | Completion | Status | Key Highlights |
 | :--- | :--- | :--- | :--- |
-| **ML Models & Threat Fusion** | **100%** | ✅ Production Ready | 6 models trained & hardened (Linux, Windows, CICIDS, EMBER, HDFS, Zero-Day) |
-| **Kernel Telemetry (eBPF & ETW)**| **100%** | ✅ Production Ready | Native Linux eBPF tracepoints (< 1.5% CPU) & Windows ETW (Events 1, 3, 6) |
+| **ML Models & Threat Fusion** | **100%** | ✅ Production Ready | 6 models trained & hardened (Linux, Windows, CICIDS, EMBER, HDFS, Zero-Day); Windows v3 isolated in shadow mode |
+| **Kernel Telemetry (eBPF & ETW)**| **100%** | ✅ Production Ready | Native Linux eBPF tracepoints (< 1.5% CPU) & Windows ETW (Events 1, 3, 6); `CollectorHealthRegistry` observability |
 | **CI/CD Automation (GitHub Actions)**| **100%** | ✅ Production Ready | Multi-OS runner matrix (Linux/Windows), linting, package signing, Docker build tests |
 | **YARA & Sigma Rule Engines & UI** | **100%** | ✅ Production Ready | Sigma YAML translation into eBPF/ETW predicates & fast in-memory YARA scanner with UI Studio |
 | **50k+ ev/s Stress & Flamegraph UI**| **100%** | ✅ Certified | 50,000+ ev/s queue stress harness & CPU flamegraphs (12.3x eBPF efficiency gain) |
 | **GenAI Copilot & Playbooks** | **100%** | ✅ Production Ready | LLM root-cause synthesis, MITRE attribution, and automated Bash/PowerShell containment scripts |
 | **STIX / TAXII & MISP Threat Intel**| **100%** | ✅ Production Ready | Real-time IOC memory matching (IPs, subnets, domains, hashes) from CTI feeds |
-| **Enterprise RBAC & Agent Auth** | **100%** | ✅ Production Ready | Role hierarchy (Admin/Analyst/Auditor) bearer tokens & swarm mTLS HMAC keys |
+| **Enterprise RBAC & Agent Auth** | **100%** | ✅ Production Ready | Role hierarchy (Admin/Analyst/Auditor) bearer tokens, strict endpoint authorization & agent token verification |
 | **Fleet Management & Updates** | **100%** | ✅ Production Ready | Remote config pushes over WebSocket/REST & Ed25519 asymmetric package verification |
 | **Compliance & MITRE Reports** | **100%** | ✅ Production Ready | MITRE ATT&CK SVG heatmaps & ISO 27001 / NIST CSF compliance PDF reports |
-| **P2P Wire Mesh Consensus** | **100%** | ✅ Verified | Pure P2P ZeroMQ / UDP mesh; Byzantine weighted consensus quorum |
-| **Swarm & Byzantine Sim** | **100%** | ✅ Verified | Live 3–5 node swarm, rogue node outvoting & partition healing harness |
+| **P2P Wire Mesh Consensus** | **100%** | ✅ Hardened | Pure P2P ZeroMQ / UDP mesh; Ed25519-signed weighted consensus quorum with anti-replay & strict validation |
+| **Swarm & Resilience Sim** | **100%** | ✅ Verified | Live 3–5 node swarm, rogue node outvoting & partition healing harness |
 | **Enterprise SIEM & Webhooks**| **100%** | ✅ Production Ready | Syslog RFC 5424/3164, CEF, Slack, Teams, Discord, PagerDuty, Splunk HEC, Elastic |
 | **Red vs Blue Battle Campaign**| **100%** | ✅ Production Ready | 5-phase kill-chain, live defender telemetry ($\mu s$), auto-mitigation & forensic PDF |
 | **Explainable AI (XAI)** | **100%** | ✅ Verified | SHAP feature attribution waterfalls, baseline deltas & SOC narratives |
@@ -44,9 +46,9 @@ AEGIS features a **dual-dashboard operational architecture**:
 | **React SOC Defender Dashboard** | **100%** | ✅ Verified | 15 feature tabs, live WebSocket telemetry, PDF report export |
 | **Cross-Platform Agent Packaging** | **100%** | ✅ Production Ready | Systemd unit, PowerShell installer, doctor probe, `.tar.gz`/`.zip` dist |
 | **Turnkey Docker Stack** | **100%** | ✅ Production Ready | One-click bash/ps1 scripts, PostgreSQL, backend, defender UI, C2 & swarm |
-| **Command Node & DB Layer** | **100%** | ✅ Production Ready | FastAPI async backend, PostgreSQL 15 / NeonDB + SQLite fallback |
-| **Automated Mitigation Driver** | **100%** | ✅ Production Ready | Real OS iptables/netsh rules + simulated fallback execution |
-| **Overall** | **100%** | 🚀 **Complete & Verified** | **End-to-End Operational & Validated (260/260 Tests Passing)** |
+| **Command Node & DB Layer** | **100%** | ✅ Production Ready | FastAPI async backend, PostgreSQL 15 / NeonDB + SQLite fallback; strict Pydantic v2 schemas |
+| **Automated Mitigation Driver** | **100%** | ✅ Production Ready | Safe simulation default (`AEGIS_RESPONSE_MODE=simulation`) + elevated OS iptables/netsh execution |
+| **Overall** | **100%** | 🚀 **Complete & Hardened** | **End-to-End Operational & Hardened (285/293 Tests Passing, 8 Skipped)** |
 
 
 
@@ -549,11 +551,14 @@ python experiments/benchmarks/collector_profiler.py
 
 ## 🧪 Testing & Verification Suite
 
-AEGIS includes a comprehensive **260+ test suite** verifying all ML inference engines, P2P mesh consensus, Byzantine fault tolerance, SIEM/Webhook forwarders, Battle Campaign orchestrators, Sigma/YARA engines, Threat Intel CTI lookups, RBAC authentication, database persistence, and daemon packaging:
+AEGIS includes a comprehensive **285+ test suite (285 passing, 8 skipped, 0 failing across 293 total tests)** verifying ML inference engines, cryptographically-signed P2P quorum consensus, replay and forgery resistance, RBAC authentication & authorization, response driver precision, SIEM/Webhook forwarders, Battle Campaign orchestrators, Sigma/YARA engines, Threat Intel CTI lookups, database persistence, and daemon packaging:
 
 ```bash
-# Run complete test suite (260 passing)
+# Run complete test suite (285 passing, 8 skipped)
 pytest tests/ -v
+
+# Run P0/P1 Security & Consensus Hardening Verification suite (25 tests)
+pytest tests/test_security_and_consensus_hardening.py -v
 
 # Run Threat Intelligence CTI feed tests
 pytest tests/test_threat_intel_service.py -v
@@ -623,7 +628,9 @@ pytest tests/test_stress_and_profiler.py -v
 | `GET` | `/api/benchmark/flamegraph`| Generate standalone vector SVG execution flamegraph |
 | `POST` | `/api/reports/executive` | Generate executive compliance PDF report |
 | `POST` | `/api/reports/incident` | Generate incident-specific forensic PDF report |
-| `POST` | `/api/trust/feedback` | SOC operator trust calibration feedback loop |
+| `POST` | `/api/trust/feedback` | SOC operator trust calibration feedback loop (Admin role required) |
+| `GET` | `/api/collectors/health` | Collector health registry diagnostics across live collectors |
+| `GET` | `/api/system/status` | Command Node comprehensive system health, DB & model metrics |
 
 
 

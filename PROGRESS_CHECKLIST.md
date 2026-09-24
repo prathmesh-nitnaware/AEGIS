@@ -21,8 +21,9 @@
 - **Turnkey Production Containerization:** 4 / 4 items complete (100.0%) — *PostgreSQL, FastAPI backend, SOC Defender UI, Red C2 console, Swarm agents, deploy_stack scripts*
 - **Enterprise SIEM & SOC Alert Forwarding:** 5 / 5 items complete (100.0%) — *Syslog RFC 5424/3164, CEF, Slack, Teams, Discord, PagerDuty, Splunk HEC, Elasticsearch*
 - **Automated Red vs. Blue Live Battle Campaign:** 5 / 5 items complete (100.0%) — *5-phase kill-chain, live defender telemetry, latency tracking (µs), automated forensic PDF*
-- **Cross-cutting Testing & Verification:** 260 / 260 Pytest tests passing (100.0%)
-- **Overall Completion:** 141 / 141 items complete (100.0%)
+- **P0/P1 Security & Consensus Hardening:** 5 / 5 items complete (100.0%) — *Ed25519 message signatures, anti-replay nonces, strict Pydantic v2 schemas, RBAC endpoint protection & response precision*
+- **Cross-cutting Testing & Verification:** 285 / 293 Pytest tests passing (8 skipped, 0 failing, 100.0% pass rate)
+- **Overall Completion:** 142 / 142 items complete (100.0%)
 
 
 
@@ -414,6 +415,29 @@
 
 ---
 
+## 🛡️ P0/P1 Security & Consensus Hardening (Audit Remediation)
+- [x] **P2P Mesh Cryptographic Signatures & Anti-Replay (`agent/p2p_mesh.py`):**
+  - [x] Ed25519 digital keypair generation (`PeerCrypto`), public key exchange, and per-message SHA256/Ed25519 signature verification.
+  - [x] Replay attack prevention via `ReplayProtector` with high-throughput LRU cache and clock-skew expiration (max 60s).
+  - [x] Peer vote response deduplication per `vote_id`.
+  - [x] Bounded input validation on `threat_score`, `confidence`, and `trust_score` in $[0.0, 1.0]$.
+  - [x] Explicit Quorum State Machine (`NO_QUORUM`, `PARTIAL_QUORUM`, `CONSENSUS_REACHED`) distinguishing `LOCAL_EMERGENCY_VERDICT` from `PEER_CONSENSUS_VERDICT`.
+- [x] **Command Node RBAC & State Machine Guardrails (`backend/telemetry_api.py`, `backend/schemas.py`):**
+  - [x] Pydantic v2 validation schemas for all incoming agent & management payloads.
+  - [x] Strict RBAC role enforcement (Admin required for trust calibration and maintenance suppression).
+  - [x] Action hijacking prevention: agent ID match verification against assigned target agent.
+  - [x] Terminal action ACK duplicate rejection (HTTP 409 Conflict).
+  - [x] Localhost-only CORS origin allowlist replacing wildcard credentials configuration.
+- [x] **Telemetry & Response Observability (`agent/live_collectors.py`, `agent/response_driver.py`):**
+  - [x] `CollectorHealthRegistry` tracking per-collector health status (`HEALTHY`, `DEGRADED`, `FAILED`, `IDLE`).
+  - [x] Structured logging replacing bare `except Exception: pass` blocks in live collectors.
+  - [x] Standardized response action status reporting (`SIMULATED`, `EXECUTED`, `FAILED`, `PARTIAL`, `NOT_FOUND`, `DENIED`).
+  - [x] Safe simulation default (`AEGIS_RESPONSE_MODE=simulation`) preventing accidental disruption to production hosts.
+  - [x] Windows v3 candidate strictly isolated in shadow evaluation mode (excluded from `ThreatFusionEngine.ACTIVE_FUSION_KEYS`).
+
+---
+
 ## Testing & Quality Assurance
-- [x] Complete test suite passing with 260 passing tests across unit, integration, simulation, Copilot, Threat Intel, and RBAC layers.
+- [x] Complete test suite passing with **285 passing tests** (8 skipped, 0 failing across 293 total tests).
+- [x] 25 new comprehensive security, consensus correctness, and response precision verification tests in `tests/test_security_and_consensus_hardening.py`.
 - [x] Zero regressions across ML engines, P2P mesh consensus, database persistence, rules engines, and API routes.

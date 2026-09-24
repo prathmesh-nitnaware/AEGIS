@@ -205,8 +205,8 @@ async def test_autonomous_hands_free_loop():
         for act in pending_actions:
             res = consumer.execute_action(act)
             raw_status = res.get("status", "failed").lower()
-            status = "SUCCESS" if raw_status in ("success", "alert_raised", "not_found") else (
-                "SIMULATED_SUCCESS" if raw_status == "simulated_success" else "FAILED"
+            status = "SUCCESS" if raw_status in ("success", "alert_raised", "not_found", "executed") else (
+                "SIMULATED" if raw_status in ("simulated", "simulated_success") else "FAILED"
             )
             ack_resp = await client.post(
                 f"/api/agents/{agent_id}/actions/{act['action_id']}/ack",
@@ -222,7 +222,7 @@ async def test_autonomous_hands_free_loop():
         assert resp_all.status_code == 200
         matching_actions = [a for a in resp_all.json()["actions"] if a["action_id"] == action_id]
         assert len(matching_actions) == 1
-        assert matching_actions[0]["status"] in ("SUCCESS", "SIMULATED_SUCCESS")
+        assert matching_actions[0]["status"] in ("SUCCESS", "SIMULATED", "SIMULATED_SUCCESS", "EXECUTED")
         assert matching_actions[0]["executed_at"] is not None
 
         # Step 4: Verify audit log on Command Node contains the executed action

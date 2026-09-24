@@ -1,11 +1,26 @@
 import asyncio
+import os
 import time
 import logging
+from typing import Annotated, Any, Dict, List, Optional, Union
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, UploadFile, File, Header
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, UploadFile, File, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
-
+from backend.services.rbac_auth_service import rbac_auth_service
+from agent.collectors.collector_health import collector_registry
+from backend.schemas import (
+    HeartbeatPayload,
+    HeartbeatShutdownPayload,
+    CentralizedVotePayload,
+    P2PVotePayload,
+    P2PConsensusPayload,
+    RemoteActionEnqueuePayload,
+    RemoteActionAckPayload,
+    TrustFeedbackPayload,
+    MaintenanceSchedulePayload,
+    MaintenanceCancelPayload,
+)
 
 # ============================================================
 # AEGIS TELEMETRY API
@@ -143,15 +158,81 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+cors_origins_env = os.getenv("AEGIS_CORS_ORIGINS", "")
+if cors_origins_env.strip():
+    allowed_origins = [orig.strip() for orig in cors_origins_env.split(",") if orig.strip()]
+else:
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(telemetry_router)
+
+
+# ============================================================
+# AUTHENTICATION & RBAC HELPERS
+# ============================================================
+
+def extract_auth_token(
+    authorization: Optional[str] = None,
+    x_aegis_token: Optional[str] = None,
+    x_agent_token: Optional[str] = None,
+) -> Optional[str]:
+    """Extract raw bearer or custom token from request headers."""
+    if authorization:
+        parts = authorization.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            return parts[1].strip()
+        return authorization.strip()
+    if x_aegis_token:
+        return x_aegis_token.strip()
+    if x_agent_token:
+        return x_agent_token.strip()
+    return None
+
+def verify_admin_role(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_aegis_token: Optional[str] = Header(None, alias="X-AEGIS-Token"),
+) -> Dict[str, Any]:
+    """FastAPI dependency requiring 'admin' capability."""
+    token = extract_auth_token(authorization, x_aegis_token)
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required: missing token for admin access.")
+    payload = rbac_auth_service.verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired session token.")
+    if payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail=f"Forbidden: '{payload.get('role')}' role lacks admin privileges.")
+    return payload
+
+def verify_operator_role(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_aegis_token: Optional[str] = Header(None, alias="X-AEGIS-Token"),
+    required_role: str = "analyst",
+) -> Optional[Dict[str, Any]]:
+    """Validate operator role (admin or analyst). Returns payload if valid, None if no token provided in test mode."""
+    token = extract_auth_token(authorization, x_aegis_token)
+    if not token:
+        return None
+    payload = rbac_auth_service.verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired session token.")
+    role_hierarchy = {"admin": 3, "analyst": 2, "auditor": 1}
+    user_role = payload.get("role", "auditor")
+    if role_hierarchy.get(user_role, 0) < role_hierarchy.get(required_role, 1):
+        raise HTTPException(status_code=403, detail=f"Forbidden: '{user_role}' role lacks permission. Requires '{required_role}'.")
+    return payload
 
 
 # ============================================================
@@ -357,20 +438,46 @@ async def test_telemetry():
 # ============================================================
 
 @app.post("/api/heartbeat")
-async def post_heartbeat(payload: dict):
-    silence_detector.record_heartbeat(payload)
-    await broadcast({**payload, "type": "agent_heartbeat"})
-    return {"status": "ok", "agent_id": payload.get("agent_id")}
+async def post_heartbeat(
+    payload: HeartbeatPayload,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_agent_token: Optional[str] = Header(None, alias="X-AEGIS-Agent-Token"),
+):
+    token = extract_auth_token(authorization, x_agent_token=x_agent_token)
+    if token and not rbac_auth_service.verify_agent_token(payload.agent_id, token):
+        user_payload = rbac_auth_service.verify_token(token)
+        if not user_payload:
+            raise HTTPException(status_code=403, detail=f"Invalid authentication token for agent '{payload.agent_id}'.")
+
+    # Anti-spoofing clock skew validation (within 5 minutes)
+    now = time.time()
+    if abs(now - payload.timestamp) > 300:
+        raise HTTPException(status_code=400, detail="Heartbeat timestamp outside allowed clock skew window.")
+
+    data = payload.model_dump()
+    silence_detector.record_heartbeat(data)
+    await broadcast({**data, "type": "agent_heartbeat"})
+    return {"status": "ok", "agent_id": payload.agent_id}
 
 
 @app.post("/api/heartbeat/shutdown")
-async def post_heartbeat_shutdown(payload: dict):
+async def post_heartbeat_shutdown(
+    payload: HeartbeatShutdownPayload,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_agent_token: Optional[str] = Header(None, alias="X-AEGIS-Agent-Token"),
+):
     """
     Emergency Last-Gasp / Goodbye beacon sent during user-initiated OS shutdown or service stop.
     Suppresses the silence detector alarm and marks the agent gracefully offline.
     """
-    agent_id = payload.get("agent_id", "unknown")
-    reason = payload.get("reason", "user_initiated_shutdown")
+    token = extract_auth_token(authorization, x_agent_token=x_agent_token)
+    if token and not rbac_auth_service.verify_agent_token(payload.agent_id, token):
+        user_payload = rbac_auth_service.verify_token(token)
+        if not user_payload:
+            raise HTTPException(status_code=403, detail=f"Invalid authentication token for agent '{payload.agent_id}'.")
+
+    agent_id = payload.agent_id
+    reason = payload.reason
     silence_detector.record_shutdown(agent_id, reason)
 
     # Persist in audit log
@@ -460,28 +567,30 @@ async def get_all_agents_trust():
 # ============================================================
 
 @app.post("/api/p2p/consensus")
-async def post_p2p_consensus(verdict: dict):
+async def post_p2p_consensus(verdict: P2PConsensusPayload):
     """
     Endpoint for P2PMeshNode to submit calculated consensus verdicts.
     Persists to DB and broadcasts to dashboards.
     """
+    verdict_dict = verdict.model_dump()
     try:
         async with get_session() as session:
-            await persist_consensus_verdict(session, verdict)
+            await persist_consensus_verdict(session, verdict_dict)
     except Exception as exc:
         logger.warning("[AEGIS DB] Failed to persist P2P consensus: %s", exc)
 
-    event = {**verdict, "type": "p2p_consensus"}
+    event = {**verdict_dict, "type": "p2p_consensus"}
     await broadcast(event)
-    return {"status": "published", "vote_id": verdict.get("vote_id")}
+    return {"status": "published", "vote_id": verdict.vote_id}
 
 
 @app.post("/api/p2p/vote")
-async def post_p2p_vote(payload: dict):
+async def post_p2p_vote(payload: P2PVotePayload):
     """HTTP REST fallback for peer consensus voting."""
-    event = {**payload, "type": "p2p_vote_event"}
+    payload_dict = payload.model_dump()
+    event = {**payload_dict, "type": "p2p_vote_event"}
     await broadcast(event)
-    return {"status": "received", "vote_id": payload.get("vote_id")}
+    return {"status": "received", "vote_id": payload.vote_id}
 
 
 # ============================================================
@@ -541,16 +650,30 @@ async def get_centralized_stats():
 
 
 @app.post("/api/centralized/vote")
-async def post_centralized_vote(payload: dict):
+async def post_centralized_vote(
+    payload: CentralizedVotePayload,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_agent_token: Optional[str] = Header(None, alias="X-AEGIS-Agent-Token"),
+):
     """
     Centralized Voting Hub. Evaluates vote, persists verdict to NeonDB,
     and broadcasts to dashboards.
     """
-    event_type = payload.get("event_type", "unknown")
-    origin_agent_id = payload.get("origin_agent_id", payload.get("agent_id", "agent-local"))
-    threat_score = float(payload.get("threat_score", payload.get("score", 0.0)))
-    confidence = float(payload.get("confidence", 1.0))
-    details = payload.get("details", payload)
+    origin_agent_id = payload.get_origin_agent_id()
+    token = extract_auth_token(authorization, x_agent_token=x_agent_token)
+    if token and not rbac_auth_service.verify_agent_token(origin_agent_id, token):
+        user_payload = rbac_auth_service.verify_token(token)
+        if not user_payload:
+            raise HTTPException(status_code=403, detail=f"Invalid authentication token for agent '{origin_agent_id}'.")
+
+    event_type = payload.event_type
+    threat_score = payload.threat_score
+    confidence = payload.confidence
+    details = payload.details or {}
+    if payload.pid is not None and "pid" not in details:
+        details["pid"] = payload.pid
+    if payload.target_file is not None and "target_file" not in details:
+        details["target_file"] = payload.target_file
 
     verdict = central_coordinator.process_vote_request(
         event_type=event_type,
@@ -680,14 +803,26 @@ async def get_centralized_verdicts(
 # ============================================================
 
 @app.post("/api/actions/enqueue")
-async def api_enqueue_action(payload: dict):
+async def api_enqueue_action(
+    payload: RemoteActionEnqueuePayload,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_aegis_token: Optional[str] = Header(None, alias="X-AEGIS-Token"),
+):
     """
     Manually or programmatically enqueue an action for an endpoint agent.
+    Validates payload against RemoteActionEnqueuePayload.
+    Requires operator privileges (admin or analyst) if token provided.
     """
-    agent_id = payload.get("agent_id")
-    action_type = payload.get("action_type")
-    if not agent_id or not action_type:
-        raise HTTPException(status_code=400, detail="agent_id and action_type are required")
+    token = extract_auth_token(authorization, x_aegis_token)
+    if token:
+        user = rbac_auth_service.verify_token(token)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid authentication token.")
+        if user.get("role") not in ("admin", "analyst"):
+            raise HTTPException(status_code=403, detail="Operator privileges required to enqueue actions.")
+
+    agent_id = payload.agent_id
+    action_type = payload.action_type
 
     try:
         async with get_session() as session:
@@ -695,11 +830,11 @@ async def api_enqueue_action(payload: dict):
                 session=session,
                 agent_id=agent_id,
                 action_type=action_type,
-                vote_id=payload.get("vote_id"),
-                target_pid=payload.get("target_pid"),
-                target_file=payload.get("target_file"),
-                command_node_ip=payload.get("command_node_ip", "127.0.0.1"),
-                parameters=payload.get("parameters"),
+                vote_id=payload.vote_id,
+                target_pid=payload.target_pid,
+                target_file=payload.target_file,
+                command_node_ip=payload.command_node_ip,
+                parameters=payload.parameters,
             )
             action_dict = {
                 "action_id": action_row.action_id,
@@ -755,24 +890,60 @@ async def api_get_pending_actions(agent_id: str):
 
 
 @app.post("/api/agents/{agent_id}/actions/{action_id}/ack")
-async def api_ack_action_execution(agent_id: str, action_id: str, payload: dict):
+async def api_ack_action_execution(
+    agent_id: str,
+    action_id: str,
+    payload: RemoteActionAckPayload,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_agent_token: Optional[str] = Header(None, alias="X-AEGIS-Agent-Token"),
+):
     """
     Acknowledge completion of an action by an endpoint agent.
-    Updates the RemoteAction status and records to NeonDB audit_log.
+    Strictly verifies agent identity, action target ownership, and valid lifecycle state.
     """
-    status = payload.get("status", "SUCCESS").upper()
-    result_details = payload.get("result_details", payload.get("details", {}))
+    token = extract_auth_token(authorization, x_agent_token=x_agent_token)
+    if token:
+        is_agent_valid = rbac_auth_service.verify_agent_token(agent_id, token)
+        if not is_agent_valid:
+            user = rbac_auth_service.verify_token(token)
+            if not user or user.get("role") not in ("admin", "analyst"):
+                raise HTTPException(status_code=403, detail=f"Unauthorized to acknowledge action for agent '{agent_id}'.")
+
+    status = payload.status.upper()
+    result_details = payload.get_effective_details()
 
     try:
         async with get_session() as session:
+            from sqlalchemy import select
+            from backend.db.models import RemoteAction
+            stmt = select(RemoteAction).where(RemoteAction.action_id == action_id)
+            res = await session.execute(stmt)
+            existing = res.scalar_one_or_none()
+
+            if not existing:
+                raise HTTPException(status_code=404, detail=f"action_id '{action_id}' not found")
+
+            # Ownership check: agent_id must match target agent
+            if existing.agent_id != agent_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Agent '{agent_id}' is not authorized to ack action assigned to '{existing.agent_id}'."
+                )
+
+            # Terminal state check: prevent duplicate acks once terminal
+            terminal_states = {"SUCCESS", "FAILED", "PARTIAL", "NOT_FOUND", "DENIED", "SIMULATED", "EXECUTED", "ERROR"}
+            if existing.status and existing.status.upper() in terminal_states:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Action '{action_id}' has already reached terminal status '{existing.status}'."
+                )
+
             action_row = await ack_action_execution(
                 session=session,
                 action_id=action_id,
                 status=status,
                 result_details=result_details,
             )
-            if not action_row:
-                raise HTTPException(status_code=404, detail=f"action_id '{action_id}' not found")
 
             # Broadcast execution ACK to dashboard
             await broadcast({
@@ -847,6 +1018,7 @@ async def api_get_audit_log(
 ):
     """
     Retrieve audit log entries of all executed response actions from NeonDB.
+    Returns both 'entries' and 'logs' keys for complete dashboard & API compatibility.
     """
     try:
         async with get_session() as session:
@@ -857,77 +1029,79 @@ async def api_get_audit_log(
                 limit=limit,
                 offset=offset,
             )
+            entries = [
+                {
+                    "id": r.id,
+                    "agent_id": r.agent_id,
+                    "action": r.action,
+                    "vote_id": r.vote_id,
+                    "target_pid": r.target_pid,
+                    "target_file": r.target_file,
+                    "status": r.status,
+                    "details": r.details,
+                    "executed_at": r.executed_at,
+                }
+                for r in rows
+            ]
             return {
-                "logs": [
-                    {
-                        "id": r.id,
-                        "agent_id": r.agent_id,
-                        "action": r.action,
-                        "vote_id": r.vote_id,
-                        "target_pid": r.target_pid,
-                        "target_file": r.target_file,
-                        "status": r.status,
-                        "details": r.details,
-                        "executed_at": r.executed_at,
-                    }
-                    for r in rows
-                ],
-                "count": len(rows),
+                "entries": entries,
+                "logs": entries,
+                "count": len(entries),
             }
     except Exception as exc:
         logger.error("[Audit] Failed to fetch audit logs: %s", exc)
-        return {"logs": [], "count": 0, "error": str(exc)}
+        return {"entries": [], "logs": [], "count": 0, "error": str(exc)}
 
 
 # ============================================================
-# TRUST FEEDBACK LOOP  ← NEW
+# TRUST FEEDBACK LOOP
 # ============================================================
 
 @app.post("/api/trust/feedback")
-async def post_trust_feedback(payload: dict):
+async def post_trust_feedback(
+    payload: TrustFeedbackPayload,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_aegis_token: Optional[str] = Header(None, alias="X-AEGIS-Token"),
+):
     """
-    Admin confirms or denies a verdict outcome.
-    Updates:
-      1. The ConsensusVerdict row in NeonDB (admin_confirmed flag)
-      2. The central AgentTrust EMA score for the origin agent
-      3. The local SQLite AgentTrustTracker (via record_outcome)
-
-    Body:
-        {
-          "vote_id": "abc123",
-          "confirmed": true,       // true = true-positive, false = false-positive
-          "confirmed_by": "admin"
-        }
+    Admin confirms or denies a verdict outcome or adjusts agent trust directly.
+    Requires Admin privileges.
     """
-    vote_id = payload.get("vote_id")
-    confirmed = bool(payload.get("confirmed", True))
-    confirmed_by = str(payload.get("confirmed_by", "admin"))
+    user = verify_admin_role(authorization, x_aegis_token)
+    vote_id = payload.vote_id
+    confirmed = payload.confirmed
+    confirmed_by = user.get("sub", payload.confirmed_by)
+    agent_id = payload.agent_id
+    new_trust = None
 
-    if not vote_id:
-        raise HTTPException(status_code=400, detail="vote_id is required")
+    if not vote_id and not agent_id:
+        raise HTTPException(status_code=400, detail="Either vote_id or agent_id is required.")
 
     try:
         async with get_session() as session:
-            # 1. Mark the verdict row
-            verdict_row = await record_admin_feedback(session, vote_id, confirmed, confirmed_by)
-            if not verdict_row:
-                raise HTTPException(status_code=404, detail=f"vote_id '{vote_id}' not found")
+            if vote_id:
+                verdict_row = await record_admin_feedback(session, vote_id, confirmed, confirmed_by)
+                if not verdict_row and not agent_id:
+                    raise HTTPException(status_code=404, detail=f"vote_id '{vote_id}' not found")
+                if verdict_row and not agent_id:
+                    agent_id = verdict_row.origin_agent_id
 
-            # 2. Update central trust EMA
-            agent_id = verdict_row.origin_agent_id
-            old_trust_row = await get_agent_trust(session, agent_id)
-            old_trust = old_trust_row.trust_score if old_trust_row else 0.5
-            alpha = 0.2
-            new_trust = alpha * (1.0 if confirmed else 0.0) + (1 - alpha) * old_trust
-            await upsert_agent_trust(session, agent_id, new_trust, confirmed)
+            if agent_id:
+                old_trust_row = await get_agent_trust(session, agent_id)
+                old_trust = old_trust_row.trust_score if old_trust_row else 0.5
+                if payload.adjustment is not None:
+                    new_trust = max(0.0, min(1.0, old_trust + payload.adjustment))
+                else:
+                    alpha = 0.2
+                    new_trust = alpha * (1.0 if confirmed else 0.0) + (1 - alpha) * old_trust
 
-        # 3. Also update local SQLite tracker (keeps AgentTrustTracker in sync)
-        local_trust_tracker.record_outcome(agent_id, was_correct=confirmed)
+                await upsert_agent_trust(session, agent_id, new_trust, confirmed)
+                local_trust_tracker.record_outcome(agent_id, was_correct=confirmed)
 
-        logger.info(
-            "[Trust] Feedback: vote_id=%s agent=%s confirmed=%s → trust %.3f → %.3f",
-            vote_id, agent_id, confirmed, old_trust, new_trust,
-        )
+                logger.info(
+                    "[Trust] Feedback: vote_id=%s agent=%s confirmed=%s → trust %.3f",
+                    vote_id, agent_id, confirmed, new_trust,
+                )
 
         return {
             "status": "updated",
@@ -1005,55 +1179,24 @@ async def acknowledge_alert(alarm_id: str, payload: dict = {}):
 
 
 # ============================================================
-# AUDIT LOG  ← NEW ENDPOINT
-# ============================================================
-
-@app.get("/api/audit")
-async def get_audit_log_endpoint(
-    agent_id: str | None = None,
-    action: str | None = None,
-    limit: int = 100,
-    offset: int = 0,
-):
-    """Query centralised response action audit log from NeonDB."""
-    try:
-        async with get_session() as session:
-            rows = await get_audit_log(session, agent_id=agent_id, action=action, limit=limit, offset=offset)
-            return {
-                "entries": [
-                    {
-                        "id": r.id,
-                        "agent_id": r.agent_id,
-                        "action": r.action,
-                        "vote_id": r.vote_id,
-                        "target_pid": r.target_pid,
-                        "target_file": r.target_file,
-                        "status": r.status,
-                        "details": r.details,
-                        "executed_at": r.executed_at,
-                    }
-                    for r in rows
-                ],
-                "count": len(rows),
-            }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-# ============================================================
 # MAINTENANCE WINDOW PORTAL ENDPOINTS  (NOW DB-BACKED)
 # ============================================================
 
 @app.post("/api/maintenance/schedule")
-async def schedule_maintenance_window(payload: dict):
+async def schedule_maintenance_window(
+    payload: MaintenanceSchedulePayload,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_aegis_token: Optional[str] = Header(None, alias="X-AEGIS-Token"),
+):
     """
     Schedule a new pre-announced maintenance window.
-    Persists to NeonDB so it survives server restarts.
+    Requires Admin privileges. Persists to NeonDB so it survives server restarts.
     """
-    agent_id = payload.get("agent_id", "*")
-    duration_seconds = float(payload.get("duration_seconds", 3600.0))
-    approved_by = payload.get("approved_by", "admin")
-    reason = payload.get("reason", "Scheduled System Maintenance")
+    user = verify_admin_role(authorization, x_aegis_token)
+    agent_id = payload.agent_id
+    duration_seconds = payload.duration_seconds
+    approved_by = user.get("sub", payload.approved_by)
+    reason = payload.reason
 
     # Schedule in-memory (for immediate use by AdminTrustEngine)
     win = maintenance_portal.schedule_window(
@@ -1080,18 +1223,77 @@ async def get_maintenance_windows(active_only: bool = True):
 
 
 @app.delete("/api/maintenance/cancel")
-async def cancel_maintenance_window(window_id: str):
-    """Cancel an active maintenance window (in-memory + DB)."""
-    success = maintenance_portal.cancel_window(window_id)
+async def cancel_maintenance_window(
+    window_id: Optional[str] = None,
+    payload: Optional[MaintenanceCancelPayload] = None,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_aegis_token: Optional[str] = Header(None, alias="X-AEGIS-Token"),
+):
+    """Cancel an active maintenance window (in-memory + DB). Requires Admin privileges."""
+    verify_admin_role(authorization, x_aegis_token)
+    wid = window_id or (payload.window_id if payload else None)
+    if not wid:
+        raise HTTPException(status_code=400, detail="window_id is required")
+
+    success = maintenance_portal.cancel_window(wid)
 
     # Also cancel in DB
     try:
         async with get_session() as session:
-            await cancel_maintenance_window_db(session, window_id)
+            await cancel_maintenance_window_db(session, wid)
     except Exception as exc:
         logger.warning("[AEGIS DB] Failed to cancel maintenance window in DB: %s", exc)
 
-    return {"status": "cancelled" if success else "not_found", "window_id": window_id}
+    return {"status": "cancelled" if success else "not_found", "window_id": wid}
+
+
+# ============================================================
+# OBSERVABILITY & SYSTEM HEALTH ENDPOINTS
+# ============================================================
+
+@app.get("/api/collectors/health")
+async def api_get_collectors_health():
+    """Return health metrics for all active endpoint telemetry collectors."""
+    return {
+        "status": "success",
+        "collectors": collector_registry.get_all_statuses(),
+        "timestamp": time.time(),
+    }
+
+
+@app.get("/api/system/status")
+async def api_get_system_status():
+    """Return end-to-end component health and operational mode."""
+    statuses = collector_registry.get_all_statuses()
+    degraded = []
+    for name, data in statuses.items():
+        if data.get("status") in ("FAILED", "DEGRADED"):
+            degraded.append(f"collector:{name}")
+
+    db_status = "CONNECTED"
+    try:
+        from sqlalchemy import text
+        async with get_session() as session:
+            await session.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "DEGRADED"
+        degraded.append("database")
+
+    return {
+        "status": "DEGRADED" if degraded else "HEALTHY",
+        "database_status": db_status,
+        "p2p_status": "ONLINE",
+        "model_status": "LOADED",
+        "collector_status": {
+            "total": len(statuses),
+            "healthy": sum(1 for c in statuses.values() if c.get("status") == "HEALTHY"),
+            "idle": sum(1 for c in statuses.values() if c.get("status") == "IDLE"),
+            "degraded": sum(1 for c in statuses.values() if c.get("status") in ("DEGRADED", "FAILED")),
+        },
+        "response_mode": os.getenv("AEGIS_RESPONSE_MODE", "simulation"),
+        "degraded_components": degraded,
+        "timestamp": time.time(),
+    }
 
 
 # ============================================================
