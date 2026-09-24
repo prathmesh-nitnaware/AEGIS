@@ -1,7 +1,7 @@
 import re
 import time
 import math
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Dict, List, Optional, Set, Union
 
 
@@ -62,13 +62,13 @@ class WindowsAdvancedV2FeatureExtractor:
 
         # 3. scripting_indicator
         script_flag = 0
-        img_name = Path(state.image).name.lower() if state.image else ""
+        img_name = PureWindowsPath(state.image).name.lower() if state.image else ""
         if img_name in cls.SCRIPTING_ENGINES:
             script_flag = 1
 
         # 4. parent_spawn_anomaly
         parent_anomaly = 0
-        parent_name = Path(state.parent_image).name.lower() if state.parent_image else ""
+        parent_name = PureWindowsPath(state.parent_image).name.lower() if state.parent_image else ""
         if script_flag == 1 and parent_name in cls.SUSPICIOUS_PARENTS:
             parent_anomaly = 1
 
@@ -127,7 +127,7 @@ class WindowsAdvancedV3FeatureExtractor:
         if not image_path:
             return "UNKNOWN_USER_BINARY"
             
-        p = Path(image_path)
+        p = PureWindowsPath(image_path)
         img_name = p.name.lower()
         
         if img_name in cls.SYSTEM_LOGON:
@@ -165,7 +165,7 @@ class WindowsAdvancedV3FeatureExtractor:
         if parent_role == "SYSTEM_SHELL" and child_role == "UNKNOWN_USER_BINARY":
             return 1.0
             
-        p_name = Path(parent_image).name.lower() if parent_image else ""
+        p_name = PureWindowsPath(parent_image).name.lower() if parent_image else ""
         if p_name == "wmiprvse.exe" and child_role == "SYSTEM_SHELL":
             return 1.0
             
@@ -185,7 +185,7 @@ class WindowsAdvancedV3FeatureExtractor:
     def get_masquerading_indicator(cls, image_path: str) -> float:
         if not image_path:
             return 0.0
-        p = Path(image_path)
+        p = PureWindowsPath(image_path)
         img_name = p.name.lower()
         if img_name in cls.KNOWN_SYSTEM_EXECUTABLES:
             img_dir = str(p.parent).lower().replace("\\", "/")
@@ -212,7 +212,7 @@ class WindowsAdvancedV3FeatureExtractor:
                 
         # 3. scripting_indicator
         script_flag = 0
-        img_name = Path(state.image).name.lower() if state.image else ""
+        img_name = PureWindowsPath(state.image).name.lower() if state.image else ""
         if img_name in cls.SYSTEM_SHELL:
             script_flag = 1
             
@@ -288,7 +288,7 @@ class WindowsAdvancedV3CandidateFeatureExtractor:
         if not image_path:
             return "UNKNOWN_USER_BINARY"
             
-        p = Path(image_path)
+        p = PureWindowsPath(image_path)
         img_name = p.name.lower()
         
         if img_name in cls.SYSTEM_LOGON:
@@ -326,7 +326,7 @@ class WindowsAdvancedV3CandidateFeatureExtractor:
         if parent_role == "SYSTEM_SHELL" and child_role == "UNKNOWN_USER_BINARY":
             return 1.0
             
-        p_name = Path(parent_image).name.lower() if parent_image else ""
+        p_name = PureWindowsPath(parent_image).name.lower() if parent_image else ""
         if p_name == "wmiprvse.exe" and child_role == "SYSTEM_SHELL":
             return 1.0
             
@@ -354,7 +354,7 @@ class WindowsAdvancedV3CandidateFeatureExtractor:
     def get_masquerading_indicator(cls, image_path: str) -> float:
         if not image_path:
             return 0.0
-        p = Path(image_path)
+        p = PureWindowsPath(image_path)
         img_name = p.name.lower()
         if img_name in cls.KNOWN_SYSTEM_EXECUTABLES:
             img_dir = str(p.parent).lower().replace("\\", "/")
@@ -382,7 +382,7 @@ class WindowsAdvancedV3CandidateFeatureExtractor:
                 
         # 3. scripting_indicator
         script_flag = 0
-        img_name = Path(state.image).name.lower() if state.image else ""
+        img_name = PureWindowsPath(state.image).name.lower() if state.image else ""
         if img_name in cls.SYSTEM_SHELL:
             script_flag = 1
             

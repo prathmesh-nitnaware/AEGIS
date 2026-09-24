@@ -48,7 +48,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Optional
 
 _HERE = Path(__file__).resolve().parent          # .../agent/
@@ -243,7 +243,7 @@ def start_ember() -> None:
         score = engine.score_file(pe_features)
         if score is not None:
             verdict = engine.get_verdict(score)
-            fname = Path(meta["file_path"]).name
+            fname = PureWindowsPath(meta["file_path"]).name
             print(f"[ember]      {fname:<25} sha256={meta['sha256'][:12]}... -> {score:.3f} ({verdict})")
             save_event("ember", score, verdict, file_path=meta["file_path"], sha256=meta["sha256"])
 

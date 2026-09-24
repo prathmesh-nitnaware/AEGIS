@@ -23,3 +23,4 @@ aegis_audit.log
 .env
 # Docker env (contains real credentials if customized — keep template only)
 # .env.docker  ← committed as safe template; do not add credentials here
+scratch/

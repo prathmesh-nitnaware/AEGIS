@@ -34,7 +34,7 @@ import threading
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Deque, Dict, List, Optional, Union
 
 import psutil
@@ -271,7 +271,7 @@ class WindowsAPICollector:
                     # actual Sysmon manifest before relying on index 4.
                     elif ev.EventID == 7 and ev.StringInserts and len(ev.StringInserts) > 4:
                         pid = int(ev.StringInserts[2])
-                        dll_name = Path(ev.StringInserts[4]).name
+                        dll_name = PureWindowsPath(ev.StringInserts[4]).name
                         with self._lock:
                             self._buffers[pid].append(dll_name)
                         
