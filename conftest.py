@@ -17,3 +17,16 @@ from pathlib import Path
 PROJECT_ROOT = str(Path(__file__).resolve().parent)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
+
+import asyncio
+import pytest
+
+@pytest.fixture(scope="session", autouse=True)
+def initialize_test_database():
+    """Ensure database tables exist for offline and CI testing environments."""
+    from backend.db.database import init_db
+    try:
+        asyncio.run(init_db())
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Database initialization failed in test fixture: %s", exc)

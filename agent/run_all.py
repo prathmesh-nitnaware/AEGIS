@@ -49,6 +49,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 _HERE = Path(__file__).resolve().parent          # .../agent/
 _PROJECT_ROOT = _HERE.parent                      # .../AEGIS/

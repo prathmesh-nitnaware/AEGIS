@@ -1,3 +1,4 @@
+
 """
 backend/services/simulation_service.py
 ======================================
@@ -111,7 +112,6 @@ def get_simulation_status() -> Dict[str, Any]:
 
 
 def reset_simulation_state():
-    global _simulation_state
     with _state_lock:
         _simulation_state["is_running"] = False
         _simulation_state["current_scenario"] = None

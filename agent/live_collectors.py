@@ -35,7 +35,7 @@ import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Deque, Dict, List, Optional, Union
+from typing import Any, Callable, Deque, Dict, List, Optional, Union
 
 import psutil
 from watchdog.observers import Observer

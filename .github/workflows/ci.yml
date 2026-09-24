@@ -36,6 +36,9 @@ jobs:
           pip install pytest anyio pytest-asyncio flake8 ruff
 
       - name: Execute Full Pytest Test Suite
+        env:
+          DATABASE_URL: "sqlite+aiosqlite:///aegis_ci.db"
+          AEGIS_RESPONSE_MODE: "simulation"
         run: |
           python -m pytest tests/ -v
 
@@ -85,13 +88,16 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt pytest anyio pytest-asyncio
 
       - name: Build Distribution Packages (.tar.gz & .zip)
         run: |
           python scripts/package_agent.py
 
       - name: Run Package Verification Tests
+        env:
+          DATABASE_URL: "sqlite+aiosqlite:///aegis_pkg.db"
+          AEGIS_RESPONSE_MODE: "simulation"
         run: |
           python -m pytest tests/test_agent_packaging.py tests/test_fleet_and_package_verification.py -v
 

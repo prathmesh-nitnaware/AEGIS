@@ -23,3 +23,7 @@ reportlab
 httpx
 python-multipart
 pyyaml
+# --- Testing & Quality Assurance ---
+pytest
+anyio
+pytest-asyncio
