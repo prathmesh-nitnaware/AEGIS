@@ -97,6 +97,7 @@ class AegisAgentDaemon:
                 self._p2p_node = P2PMeshNode(
                     agent_id=self.config.agent_id,
                     bind_port=self.config.p2p_bind_port,
+                    command_node_url=self.config.command_node_url,
                 )
                 self._p2p_node.start()
                 for peer in self.config.p2p_peers:

@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import secrets
 import socket
 import threading
@@ -120,7 +121,7 @@ class VotingRequest:
     origin_agent_id: str
     event_type: str
     threat_score: float
-    confidence: float
+    confidence: float = 1.0
     details: Dict[str, Any] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
     nonce: str = field(default_factory=lambda: secrets.token_hex(8))
@@ -238,6 +239,8 @@ class ConsensusVerdict:
     timestamp: float = field(default_factory=time.time)
     quorum_status: str = "CONSENSUS_REACHED"  # NO_QUORUM, PARTIAL_QUORUM, CONSENSUS_REACHED
     verdict_type: str = "PEER_CONSENSUS_VERDICT"  # PEER_CONSENSUS_VERDICT, LOCAL_EMERGENCY_VERDICT, INSUFFICIENT_QUORUM
+    peer_votes: List[Dict[str, Any]] = field(default_factory=list)
+    quorum_needed: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -473,10 +476,19 @@ class WeightedConsensusAggregator:
         total_weighted_score = req.threat_score * origin_weight
         total_weight = origin_weight
 
+        peer_votes_list: List[Dict[str, Any]] = []
         for resp in responses:
             w = self.calculate_weight(resp.peer_trust_score, resp.correlated)
             total_weighted_score += resp.peer_vote_score * w
             total_weight += w
+            peer_votes_list.append({
+                "peer_agent_id": resp.peer_agent_id,
+                "peer_vote_score": round(float(resp.peer_vote_score), 4),
+                "peer_trust_score": round(float(resp.peer_trust_score), 4),
+                "correlated": bool(resp.correlated),
+                "weight": round(float(w), 4),
+                "timestamp": getattr(resp, "timestamp", time.time()),
+            })
 
         final_score = total_weighted_score / total_weight if total_weight > 0 else req.threat_score
         final_score = max(0.0, min(1.0, final_score))
@@ -519,6 +531,8 @@ class WeightedConsensusAggregator:
             total_weight=round(total_weight, 3),
             quorum_status=quorum_status,
             verdict_type=verdict_type,
+            peer_votes=peer_votes_list,
+            quorum_needed=quorum_needed,
         )
 
 
@@ -561,11 +575,15 @@ class P2PMeshNode:
         min_quorum: Optional[int] = None,
         max_message_age: float = DEFAULT_MAX_MESSAGE_AGE,
         clock_skew_tolerance: float = DEFAULT_CLOCK_SKEW_TOLERANCE,
+        command_node_url: Optional[str] = None,
     ) -> None:
         self.agent_id = agent_id
         self.bind_port = bind_port
         self.trust_tracker = trust_tracker or AgentTrustTracker(db_path=f"aegis_trust_{agent_id}.db")
         self.on_verdict = on_verdict or self._default_verdict_handler
+        self.command_node_url = (
+            command_node_url or os.getenv("COMMAND_NODE_URL", "")
+        ).rstrip("/")
 
         self.min_quorum = min_quorum
         self.max_message_age = max_message_age
@@ -658,9 +676,10 @@ class P2PMeshNode:
         self,
         event_type: str,
         threat_score: float,
-        confidence: float,
-        details: Dict[str, Any],
+        confidence: float = 1.0,
+        details: Optional[Dict[str, Any]] = None,
         timeout: float = 2.0,
+        vote_id: Optional[str] = None,
     ) -> ConsensusVerdict:
         """
         Initiate a network-wide consensus voting process for an anomaly.
@@ -668,14 +687,15 @@ class P2PMeshNode:
         Broadcasts signed `VotingRequest` to registered peers, waits up to `timeout`
         seconds for responses, aggregates results with explicit quorum, and returns `ConsensusVerdict`.
         """
-        vote_id = str(uuid.uuid4())[:8]
+        vote_id = vote_id or str(uuid.uuid4())[:8]
+        req_details = details or {}
         req = VotingRequest(
             vote_id=vote_id,
             origin_agent_id=self.agent_id,
             event_type=event_type,
             threat_score=threat_score,
             confidence=confidence,
-            details=details,
+            details=req_details,
             timestamp=time.time(),
             sender_public_key=self.public_key_hex,
         )
@@ -710,8 +730,11 @@ class P2PMeshNode:
                 except Exception as exc:
                     logger.warning("[P2PMesh] Failed to send vote request to %s:%d: %s", host, port, exc)
 
-        # Wait for responses or timeout
-        response_event.wait(timeout=timeout)
+        # Wait for responses or timeout -- only if peers exist to respond
+        if peer_list:
+            response_event.wait(timeout=timeout)
+        else:
+            logger.debug("[P2PMesh] No registered peers to broadcast to -- evaluating local quorum.")
 
         with self._lock:
             vote_data = self._active_votes.pop(vote_id, None)
@@ -732,7 +755,32 @@ class P2PMeshNode:
         except Exception as cb_exc:
             logger.warning("[P2PMesh] Error in on_verdict callback: %s", cb_exc)
 
+        # Forward verdict to Command Node to keep central DB in sync
+        self._forward_verdict_to_command_node(verdict)
+
         return verdict
+
+    def _forward_verdict_to_command_node(self, verdict: ConsensusVerdict) -> None:
+        """Asynchronously forward calculated consensus verdict to the Command Node."""
+        if not self.command_node_url:
+            return
+
+        def _send():
+            try:
+                import urllib.request
+                url = f"{self.command_node_url.rstrip('/')}/api/p2p/consensus"
+                data = json.dumps(verdict.to_dict()).encode("utf-8")
+                req = urllib.request.Request(
+                    url,
+                    data=data,
+                    headers={"Content-Type": "application/json"},
+                )
+                urllib.request.urlopen(req, timeout=3.0)
+                logger.info("[P2PMesh] Forwarded verdict %s to Command Node (%s)", verdict.vote_id, url)
+            except Exception as exc:
+                logger.debug("[P2PMesh] Could not forward verdict to Command Node: %s", exc)
+
+        threading.Thread(target=_send, daemon=True).start()
 
     def _handle_received_message(self, raw_bytes: bytes, sender_addr: Tuple[str, int]) -> None:
         """Parse, cryptographically verify, validate, and process incoming UDP message."""

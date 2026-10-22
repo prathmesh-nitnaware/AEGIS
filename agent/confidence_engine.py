@@ -332,6 +332,16 @@ class AgentTrustTracker:
         )
         return new_trust
 
+    def get_all_agents(self) -> List[str]:
+        with self._lock:
+            rows = self._conn.execute("SELECT agent_id FROM agent_trust").fetchall()
+            return [r[0] for r in rows]
+
+    def get_all_trust(self) -> Dict[str, float]:
+        with self._lock:
+            rows = self._conn.execute("SELECT agent_id, trust_score FROM agent_trust").fetchall()
+            return {r[0]: float(r[1]) for r in rows}
+
     def close(self) -> None:
         self._conn.close()
 

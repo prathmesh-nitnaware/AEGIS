@@ -213,6 +213,19 @@ class CentralizedVotingCoordinator:
 
         return responses
 
+    def record_external_verdict(self, verdict_dict: Dict[str, Any]) -> None:
+        """Idempotently record a P2P or external consensus verdict in history."""
+        v_id = verdict_dict.get("vote_id")
+        with self._lock:
+            if v_id and any(v.get("vote_id") == v_id for v in self._verdicts_history):
+                return
+            # Ensure response action is populated
+            if "response_action" not in verdict_dict:
+                verdict_dict["response_action"] = self.RESPONSE_ACTIONS.get(verdict_dict.get("severity", "LOW"), "LOG")
+            self._verdicts_history.append(verdict_dict)
+            if len(self._verdicts_history) > 1000:
+                self._verdicts_history.pop(0)
+
     def process_vote_request(
         self,
         event_type: str,
@@ -220,16 +233,24 @@ class CentralizedVotingCoordinator:
         threat_score: float,
         confidence: float = 1.0,
         details: Optional[Dict[str, Any]] = None,
+        vote_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Process a voting request centrally: evaluate correlation, aggregate weighted
         consensus, and map to an automated response action.
         """
-        vote_id = str(uuid.uuid4())[:8]
+        target_vote_id = vote_id or str(uuid.uuid4())[:8]
         details = details or {}
 
+        # 0. Deduplication check: if this vote_id was already resolved (e.g. by P2P consensus)
+        with self._lock:
+            for existing in self._verdicts_history:
+                if existing.get("vote_id") == target_vote_id:
+                    logger.info("[CommandNode] Returning existing consensus verdict for vote_id=%s", target_vote_id)
+                    return existing
+
         req = VotingRequest(
-            vote_id=vote_id,
+            vote_id=target_vote_id,
             origin_agent_id=origin_agent_id,
             event_type=event_type,
             threat_score=threat_score,
@@ -251,11 +272,18 @@ class CentralizedVotingCoordinator:
 
         # 3. Aggregate weighted consensus
         origin_trust = self.trust_tracker.get_trust(origin_agent_id)
+        registered_peers = [
+            a for a in (self.trust_tracker.get_all_agents() if hasattr(self.trust_tracker, "get_all_agents") else [])
+            if a != origin_agent_id
+        ]
+        expected_peers = max(len(peer_responses), len(registered_peers)) if registered_peers else len(peer_responses)
+
         verdict: ConsensusVerdict = self.aggregator.aggregate(
-            req, peer_responses, origin_trust=origin_trust
+            req, peer_responses, origin_trust=origin_trust, expected_peers=expected_peers
         )
 
         # 4. Map severity to automated response action
+        # For critical emergencies without quorum, still enforce containment
         response_action = self.RESPONSE_ACTIONS.get(verdict.severity, "LOG")
 
         result = {
@@ -270,6 +298,11 @@ class CentralizedVotingCoordinator:
             "participating_peers": verdict.participating_peers,
             "total_weight": verdict.total_weight,
             "timestamp": verdict.timestamp,
+            "quorum_status": verdict.quorum_status,
+            "verdict_type": verdict.verdict_type,
+            "peer_votes": getattr(verdict, "peer_votes", []),
+            "quorum_needed": getattr(verdict, "quorum_needed", 1),
+            "details": details,
         }
 
         with self._lock:
@@ -278,12 +311,13 @@ class CentralizedVotingCoordinator:
                 self._verdicts_history.pop(0)
 
         logger.info(
-            "[CommandNode] CENTRALIZED CONSENSUS: vote_id=%s agent=%s severity=%s action=%s (peers=%d)",
+            "[CommandNode] CENTRALIZED CONSENSUS: vote_id=%s agent=%s severity=%s action=%s (peers=%d, quorum=%s)",
             result["vote_id"],
             result["origin_agent_id"],
             result["severity"],
             result["response_action"],
             result["participating_peers"],
+            result["quorum_status"],
         )
 
         return result
