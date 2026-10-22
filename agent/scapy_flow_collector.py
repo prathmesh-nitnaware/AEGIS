@@ -21,7 +21,7 @@ import math
 import threading
 import time
 from collections import defaultdict
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set, Iterable
 
 import numpy as np
 
@@ -54,10 +54,12 @@ class ScapyFlowCollector:
         flow_timeout: float = 10.0,
         idle_threshold: float = 1.0,
         iface: Optional[str] = None,
+        ignored_ports: Optional[Iterable[int]] = None,
     ):
         self.flow_timeout = flow_timeout
         self.idle_threshold = idle_threshold
         self.iface = iface
+        self.ignored_ports: Set[int] = {int(p) for p in ignored_ports} if ignored_ports else set()
 
         self._flows: Dict[tuple, dict] = {}
         self._lock = threading.Lock()
@@ -128,6 +130,9 @@ class ScapyFlowCollector:
             sport = int(tcp.sport)
             dport = int(tcp.dport)
 
+            if self.ignored_ports and (sport in self.ignored_ports or dport in self.ignored_ports):
+                return
+
             flags = int(tcp.flags)
 
             fin = 1 if (flags & 0x01) else 0
@@ -167,6 +172,9 @@ class ScapyFlowCollector:
 
             sport = int(udp.sport)
             dport = int(udp.dport)
+
+            if self.ignored_ports and (sport in self.ignored_ports or dport in self.ignored_ports):
+                return
 
             hdr_len = 8
 

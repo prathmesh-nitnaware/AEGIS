@@ -141,5 +141,45 @@ class TestCICIDSFullInference(unittest.TestCase):
         self.assertTrue(0.0 <= result <= 1.0)
 
 
+class TestScapyFlowCollectorPortFiltering(unittest.TestCase):
+    """Tests for management port noise filtering (e.g. port 8000, 5173)."""
+
+    def test_ignored_ports_initialization(self):
+        from agent.scapy_flow_collector import ScapyFlowCollector
+        collector = ScapyFlowCollector(ignored_ports=[8000, 5173, "5174"])
+        self.assertEqual(collector.ignored_ports, {8000, 5173, 5174})
+
+    def test_management_ports_defined_in_run_all(self):
+        import agent.run_all as run_all
+        self.assertTrue(hasattr(run_all, "AEGIS_MANAGEMENT_PORTS"))
+        self.assertIn(8000, run_all.AEGIS_MANAGEMENT_PORTS)
+        self.assertIn(5173, run_all.AEGIS_MANAGEMENT_PORTS)
+
+    def test_packets_on_ignored_ports_are_dropped(self):
+        try:
+            from scapy.all import IP, TCP
+        except ImportError:
+            self.skipTest("Scapy not installed")
+
+        from agent.scapy_flow_collector import ScapyFlowCollector
+        collector = ScapyFlowCollector(ignored_ports={8000, 5173})
+
+        # Packet targeting port 8000 (e.g. dashboard polling API)
+        pkt_8000 = IP(src="127.0.0.1", dst="127.0.0.1") / TCP(sport=54321, dport=8000, flags="S")
+        collector._on_packet(pkt_8000)
+        self.assertEqual(len(collector._flows), 0, "Packet on port 8000 was not dropped")
+
+        # Packet returning from port 8000
+        pkt_8000_ret = IP(src="127.0.0.1", dst="127.0.0.1") / TCP(sport=8000, dport=54321, flags="SA")
+        collector._on_packet(pkt_8000_ret)
+        self.assertEqual(len(collector._flows), 0, "Packet from sport 8000 was not dropped")
+
+        # Normal network packet on non-ignored port (e.g., port 443)
+        pkt_443 = IP(src="192.168.1.50", dst="1.1.1.1") / TCP(sport=49152, dport=443, flags="S")
+        collector._on_packet(pkt_443)
+        self.assertEqual(len(collector._flows), 1, "Legitimate packet was incorrectly dropped")
+
+
 if __name__ == "__main__":
     unittest.main()
+

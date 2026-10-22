@@ -81,6 +81,16 @@ PE_WATCH_DIR = r"C:\Users\%USERNAME%\Downloads"   # Windows-style; adjust for Li
 HDFS_LOG_PATH = str(_HERE / "test.log")
 
 # ---------------------------------------------------------------------------
+# AEGIS INTERNAL MANAGEMENT / TELEMETRY PORTS TO IGNORE IN NETWORK SNIFFING
+# ---------------------------------------------------------------------------
+# 8000: FastAPI Command Node API server
+# 5173, 5174: Vite React frontend dashboards
+# 5555, 5556: P2P ZeroMQ mesh node heartbeats & gossip
+# Excluding these ports prevents local web dashboard polling (/api/health, etc.)
+# from flooding the CIC-IDS network classifier as false-positive DoS/PortScan noise.
+AEGIS_MANAGEMENT_PORTS = {8000, 5173, 5174, 5555, 5556}
+
+# ---------------------------------------------------------------------------
 # CLI: --os override (manual, for testing only -- auto-detect is default)
 # ---------------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="AEGIS OS-aware telemetry agent")
@@ -211,18 +221,21 @@ def start_zero_day() -> None:
 # ===========================================================================
 
 def start_cicids() -> None:
-    net_collector = ScapyFlowCollector(flow_timeout=2.0)
+    # Pass ignored_ports to drop internal telemetry / management packets immediately at the sniffer layer.
+    net_collector = ScapyFlowCollector(flow_timeout=2.0, ignored_ports=AEGIS_MANAGEMENT_PORTS)
     net_collector.start()  # raises if scapy/privileges unavailable -- caught by collector_manager
-    print("[run_all] CICIDS scapy sniffer started (real packet/byte counts).")
+    print(f"[run_all] CICIDS scapy sniffer started (real packet/byte counts; management ports {sorted(AEGIS_MANAGEMENT_PORTS)} filtered).")
     _running_handles["cicids"] = net_collector
 
     def network_loop():
         while True:
             for flow in net_collector.pop_completed_flows():
+                dest_port = int(flow.get('Destination Port', 0))
+                if dest_port in AEGIS_MANAGEMENT_PORTS:
+                    continue
                 score = engine.score_network_flow(flow)
                 if score is not None:
                     verdict = engine.get_verdict(score)
-                    dest_port = int(flow['Destination Port'])
                     print(f"[cicids]     port={dest_port:<5} fwd_pkts={int(flow['Total Fwd Packets']):<4} "
                           f"bwd_pkts={int(flow['Total Backward Packets']):<4} -> {score:.6f} ({verdict})")
                     save_event("cicids", score, verdict, destination_port=dest_port,
