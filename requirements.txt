@@ -1,29 +1,52 @@
-fastapi
-uvicorn
-scapy
-watchdog
-lief
-pywin32; sys_platform == 'win32'
-lightgbm
-scikit-learn
-xgboost
-numpy
-pandas
-joblib
-psutil
-requests
-# --- Async DB (NeonDB / PostgreSQL + SQLite fallback) ---
-asyncpg
-sqlalchemy[asyncio]
-aiosqlite
-python-dotenv
-dnspython
-cryptography
-reportlab
-httpx
-python-multipart
-pyyaml
-# --- Testing & Quality Assurance ---
-pytest
-anyio
-pytest-asyncio
+# =============================================================================
+# AEGIS — Autonomous Edge Guardian with Intelligence Swarm
+# Production Python Dependencies Manifest
+# =============================================================================
+
+# --- Core Web API, Asynchronous Networking & P2P Mesh ---
+fastapi>=0.115.0
+uvicorn>=0.30.0
+pydantic>=2.8.0
+websockets>=13.0
+python-multipart>=0.0.9
+httpx>=0.27.0
+requests>=2.32.0
+scapy>=2.6.0
+watchdog>=5.0.0
+pyzmq>=26.0.0
+
+# --- Machine Learning, Inference & Feature Extraction ---
+numpy>=1.26.0
+scipy>=1.14.0
+pandas>=2.2.0
+pyarrow>=17.0.0
+scikit-learn>=1.5.0
+xgboost>=2.1.0
+lightgbm>=4.5.0
+joblib>=1.4.0
+lief>=0.14.0
+tqdm>=4.66.0
+
+# --- Database & Persistence (NeonDB / PostgreSQL + SQLite Fallback) ---
+sqlalchemy[asyncio]>=2.0.30
+asyncpg>=0.29.0
+aiosqlite>=0.20.0
+dnspython>=2.6.0
+python-dotenv>=1.0.1
+
+# --- Security, Cryptography & OS Telemetry ---
+cryptography>=43.0.0
+pyyaml>=6.0.1
+psutil>=6.0.0
+pywin32>=306; sys_platform == 'win32'
+
+# --- Enterprise Reporting & Visualization ---
+reportlab>=4.2.0
+matplotlib>=3.9.0
+
+# --- Testing, Linting & CI/CD Matrix Verification ---
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+anyio>=4.4.0
+ruff>=0.6.0
+flake8>=7.1.0
