@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 import warnings
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import joblib
 import numpy as np
@@ -496,6 +496,7 @@ class ThreatFusionEngine:
         self,
         syscall_sequence: Optional[Sequence[int]] = None,
         api_call_sequence: Optional[Sequence[str]] = None,
+        process_features: Optional[Union[Sequence[float], Any]] = None,
     ) -> Optional[float]:
         """
         Score a process event against the Linux IDS or Windows Advanced model.
@@ -506,6 +507,9 @@ class ThreatFusionEngine:
             Raw Linux syscall numbers.  Triggers the Linux IDS (Model 1).
         api_call_sequence : list[str], optional
             Windows API/DLL call name strings.  Triggers Windows Advanced (Model 2).
+        process_features : list[float] or ProcessContextState, optional
+            Windows process context features (9-dimensional vector from V3 or ProcessContextState).
+            Triggers Windows Advanced V3 (Model 2c - 97.4% accuracy).
 
         Returns
         -------
@@ -513,6 +517,17 @@ class ThreatFusionEngine:
         """
         if syscall_sequence is not None:
             return self._score_linux(syscall_sequence)
+        if process_features is not None:
+            # If a ProcessContextState object was passed, extract features dynamically
+            if hasattr(process_features, "command_line") and hasattr(process_features, "image"):
+                try:
+                    from agent.windows_process_context import WindowsAdvancedV3FeatureExtractor
+
+                    feats = WindowsAdvancedV3FeatureExtractor.extract_features(process_features)
+                    return self.score_windows_v3(feats)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[windows_v3] Feature extraction from state failed: %s", exc)
+            return self.score_windows_v3(process_features)
         if api_call_sequence is not None:
             return self._score_windows(api_call_sequence)
         return None

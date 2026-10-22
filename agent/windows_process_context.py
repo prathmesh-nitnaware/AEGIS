@@ -448,6 +448,9 @@ class WindowsProcessContextAggregator:
         if not guid:
             if pid and pid in self.pid_to_guid:
                 guid = self.pid_to_guid[pid]
+            elif pid and event_id == 1:
+                guid = f"GUID_PID_{pid}_{int(time.time() * 1000)}"
+                self.pid_to_guid[pid] = guid
             else:
                 return
 
@@ -476,8 +479,8 @@ class WindowsProcessContextAggregator:
             state = self.processes.get(guid)
             if state:
                 state.last_active_at = time.time()
-                dest_ip = ev.get("destination_ip", "")
-                dest_port = ev.get("destination_port", 0)
+                dest_ip = ev.get("destination_ip") or ev.get("dest_ip", "")
+                dest_port = ev.get("destination_port") or ev.get("dest_port", 0)
                 if dest_ip:
                     state.network_destinations.add(f"{dest_ip}:{dest_port}")
 
