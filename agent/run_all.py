@@ -47,6 +47,7 @@ import json
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 from typing import Optional
@@ -88,6 +89,18 @@ parser.add_argument(
     "--os", dest="os_override", default=None, choices=["windows", "linux", "Windows", "Linux"],
     help="Manually force a telemetry profile (windows/linux). Default: auto-detect.",
 )
+parser.add_argument(
+    "--p2p-port", dest="p2p_port", type=int, default=0,
+    help="Enable P2P mesh node on this UDP port (0 to disable UDP server, default: 0).",
+)
+parser.add_argument(
+    "--agent-id", dest="agent_id", default="agent-host-local",
+    help="Agent ID identifier for peer voting and telemetry (default: agent-host-local).",
+)
+parser.add_argument(
+    "--command-node", dest="command_node_url", default="http://127.0.0.1:8000",
+    help="URL of central command node (default: http://127.0.0.1:8000).",
+)
 args, _ = parser.parse_known_args()
 
 OS_NAME = resolve_os(args.os_override)
@@ -107,6 +120,129 @@ OUTPUT_FILE = OUTPUT_DIR / "telemetry_scores.jsonl"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 _write_lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# P2P Mesh & Peer Voting Subsystem
+# ---------------------------------------------------------------------------
+_p2p_node = None
+if getattr(args, "p2p_port", 0) > 0:
+    try:
+        from p2p_mesh import P2PMeshNode
+        _p2p_node = P2PMeshNode(
+            agent_id=getattr(args, "agent_id", "agent-host-local"),
+            bind_port=args.p2p_port,
+            command_node_url=getattr(args, "command_node_url", "http://127.0.0.1:8000"),
+        )
+        _p2p_node.start()
+        print(f"[run_all] P2P Wire Mesh node listening on UDP port {args.p2p_port}")
+    except Exception as exc:
+        print(f"[run_all] Warning: P2P Wire Mesh start failed: {exc}")
+
+_vote_cooldown: dict = {}
+_vote_lock = threading.Lock()
+_COOLDOWN_SECONDS = 3.0
+
+EVENT_TYPE_MAP = {
+    "cicids": "network",
+    "ember": "file",
+    "hdfs": "log_line",
+    "windows_advanced": "process_windows",
+    "windows_advanced_v2": "process_windows",
+    "windows_advanced_v3": "process_windows",
+    "windows_advanced_v3_candidate": "process_windows",
+    "zero_day": "windows_event",
+    "linux_ids": "process_linux",
+    "linux": "process_linux",
+}
+
+
+def _trigger_peer_voting_async(model: str, score: float, verdict: str, extra: dict):
+    """
+    Trigger peer voting for MEDIUM, HIGH, and CRITICAL threats (score >= 0.30).
+    Applies anti-storm cooldown deduplication, maps canonical event_type,
+    and dispatches via P2P mesh or centralized command node coordinator.
+    """
+    # 1. Deduplication key based on attack signature
+    if model == "cicids":
+        dedup_target = f"port={extra.get('destination_port', 'any')}"
+    elif model == "ember":
+        dedup_target = f"sha256={str(extra.get('sha256', extra.get('file_path', 'any')))[:16]}"
+    elif model in ("windows_advanced", "windows_advanced_v2", "windows_advanced_v3", "windows_advanced_v3_candidate"):
+        dedup_target = f"pid={extra.get('pid', 'any')}:proc={extra.get('process_name', 'any')}"
+    elif model == "zero_day":
+        dedup_target = f"proc={extra.get('process_name', 'any')}:user={extra.get('user_name', 'any')}"
+    elif model in ("linux_ids", "linux"):
+        dedup_target = f"pid={extra.get('pid', 'any')}:proc={extra.get('process_name', 'any')}"
+    else:
+        dedup_target = f"proc={extra.get('process_name', extra.get('file_path', 'any'))}"
+
+    dedup_key = f"{model}:{dedup_target}"
+    now = time.time()
+    with _vote_lock:
+        if dedup_key in _vote_cooldown and (now - _vote_cooldown[dedup_key]) < _COOLDOWN_SECONDS:
+            return
+        _vote_cooldown[dedup_key] = now
+        if len(_vote_cooldown) > 2000:
+            cutoff = now - _COOLDOWN_SECONDS
+            _vote_cooldown.clear()
+
+    # 2. Canonical event type mapping
+    event_type = EVENT_TYPE_MAP.get(model, "process_windows")
+
+    # 3. Canonical details mapping
+    details = dict(extra)
+    if event_type == "network":
+        if "destination_port" in details and "port" not in details:
+            details["port"] = details["destination_port"]
+        if "ip" in details and "dest_ip" not in details:
+            details["dest_ip"] = details["ip"]
+    elif event_type in ("process_windows", "process_linux"):
+        if "process_name" in details and "process" not in details:
+            details["process"] = details["process_name"]
+    elif event_type in ("file", "log_line"):
+        if "file_path" in details and "filename" not in details:
+            details["filename"] = PureWindowsPath(details["file_path"]).name
+
+    vote_id = str(uuid.uuid4())[:8]
+
+    def _dispatch_vote():
+        print(f"[peer_voting] Triggering peer vote for {model} ({event_type}) threat={score:.3f} [{verdict}] vote_id={vote_id}")
+        # A. Dispatch via P2P Mesh if active
+        if _p2p_node is not None:
+            try:
+                _p2p_node.initiate_vote(
+                    event_type=event_type,
+                    threat_score=score,
+                    confidence=1.0,
+                    details=details,
+                    vote_id=vote_id,
+                )
+            except Exception as exc:
+                print(f"[peer_voting] P2P mesh vote dispatch warning: {exc}")
+
+        # B. Forward to Centralized Voting Hub (with vote_id for deduplication)
+        try:
+            import urllib.request
+            payload = {
+                "vote_id": vote_id,
+                "origin_agent_id": getattr(args, "agent_id", "agent-host-local"),
+                "event_type": event_type,
+                "threat_score": score,
+                "confidence": 1.0,
+                "details": details,
+                "pid": extra.get("pid"),
+                "target_file": extra.get("file_path") or extra.get("filename"),
+            }
+            req = urllib.request.Request(
+                f"{getattr(args, 'command_node_url', 'http://127.0.0.1:8000').rstrip('/')}/api/centralized/vote",
+                data=json.dumps(payload, default=str).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            urllib.request.urlopen(req, timeout=2.0)
+        except Exception:
+            pass
+
+    threading.Thread(target=_dispatch_vote, daemon=True).start()
 
 
 def _post_event_async(event_payload: dict):
@@ -177,6 +313,10 @@ def save_event(model: str, score: Optional[float], verdict: str, **extra):
         **extra,
     }
     _post_event_async(api_payload)
+
+    # Automatically trigger peer voting from the live detection/scoring flow for MEDIUM, HIGH, and CRITICAL threats
+    if raw_score is not None and (raw_score >= 0.30 or verdict in ("MEDIUM", "HIGH", "CRITICAL")):
+        _trigger_peer_voting_async(model, raw_score, verdict, extra)
 
 
 print(f"[run_all] Scored events will also be saved to: {OUTPUT_FILE}\n")
