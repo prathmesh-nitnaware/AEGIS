@@ -42,7 +42,8 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
 try:
-    import ember_features  # local module -- lief-based EMBER extractor (agent/ember_features.py)
+    # local module -- lief-based EMBER extractor (agent/ember_features.py)
+    import ember_features
 except ImportError:
     from agent import ember_features
 
@@ -118,14 +119,16 @@ class LinuxSyscallCollector:
         a real system-wide capture use auditd instead (see note below).
         """
         if not IS_LINUX:
-            collector_registry.record_error("linux_syscall", "LinuxSyscallCollector only runs on Linux.")
+            collector_registry.record_error(
+                "linux_syscall", "LinuxSyscallCollector only runs on Linux.")
             raise RuntimeError("LinuxSyscallCollector only runs on Linux.")
 
         cmd = ["strace", "-f", "-tt"]
         if target_pid:
             cmd += ["-p", str(target_pid)]
         else:
-            collector_registry.record_error("linux_syscall", "System-wide syscall tracing requires auditd/eBPF.")
+            collector_registry.record_error(
+                "linux_syscall", "System-wide syscall tracing requires auditd/eBPF.")
             raise ValueError(
                 "System-wide syscall tracing needs auditd, not strace -- "
                 "pass a specific target_pid, or swap this for an auditd/eBPF "
@@ -135,12 +138,14 @@ class LinuxSyscallCollector:
         self._proc = subprocess.Popen(
             cmd, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True
         )
-        threading.Thread(target=self._read_loop, args=(target_pid,), daemon=True).start()
+        threading.Thread(target=self._read_loop, args=(
+            target_pid,), daemon=True).start()
 
     def _read_loop(self, pid: int):
         # strace -f writes syscall trace lines to stderr, e.g.:
         #   14:32:01.123456 openat(AT_FDCWD, "/etc/passwd", O_RDONLY) = 3
-        pattern = re.compile(r"\)\s*=\s*-?\d+")  # confirms a completed syscall line
+        # confirms a completed syscall line
+        pattern = re.compile(r"\)\s*=\s*-?\d+")
         name_pattern = re.compile(r"^\S+\s+(\w+)\(")
         assert self._proc is not None and self._proc.stderr is not None
         for line in self._proc.stderr:
@@ -150,7 +155,8 @@ class LinuxSyscallCollector:
             if not m or not pattern.search(line):
                 continue
             syscall_name = m.group(1)
-            num = self.SYSCALL_NUM_MAP.get(syscall_name, self.UNKNOWN_SYSCALL_NUM)
+            num = self.SYSCALL_NUM_MAP.get(
+                syscall_name, self.UNKNOWN_SYSCALL_NUM)
             with self._lock:
                 self._buffers[pid].append(num)
             collector_registry.record_success("linux_syscall", 1)
@@ -208,7 +214,8 @@ class WindowsAPICollector:
 
     def start(self):
         if not IS_WINDOWS:
-            collector_registry.record_error("windows_api", "WindowsAPICollector only runs on Windows.")
+            collector_registry.record_error(
+                "windows_api", "WindowsAPICollector only runs on Windows.")
             raise RuntimeError("WindowsAPICollector only runs on Windows.")
         threading.Thread(target=self._poll_loop, daemon=True).start()
 
@@ -224,7 +231,8 @@ class WindowsAPICollector:
                 hand = win32evtlog.OpenEventLog(server, log_type)
                 events = win32evtlog.ReadEventLog(hand, flags, 0)
                 if events:
-                    collector_registry.record_success("windows_api", len(events))
+                    collector_registry.record_success(
+                        "windows_api", len(events))
                 for ev in events:
                     # Event ID 1: Process Create
                     if ev.EventID == 1 and ev.StringInserts and len(ev.StringInserts) > 11:
@@ -274,7 +282,7 @@ class WindowsAPICollector:
                         dll_name = PureWindowsPath(ev.StringInserts[4]).name
                         with self._lock:
                             self._buffers[pid].append(dll_name)
-                        
+
                         event_data = {
                             "event_id": 7,
                             "utc_time": ev.StringInserts[0],
@@ -298,7 +306,8 @@ class WindowsAPICollector:
 
                 win32evtlog.CloseEventLog(hand)
             except Exception as exc:
-                logger.warning("[windows_api_collector] Error polling Sysmon event log: %s", exc)
+                logger.warning(
+                    "[windows_api_collector] Error polling Sysmon event log: %s", exc)
                 collector_registry.record_error("windows_api", str(exc))
             time.sleep(2)
 
@@ -365,7 +374,8 @@ class NetworkFlowCollector:
         try:
             conns = psutil.net_connections(kind="inet")
         except (psutil.AccessDenied, PermissionError) as exc:
-            logger.warning("[network_flow_collector] Access denied enumerating network connections: %s", exc)
+            logger.warning(
+                "[network_flow_collector] Access denied enumerating network connections: %s", exc)
             collector_registry.record_error("network_flow", str(exc))
             return flows
 
@@ -451,7 +461,8 @@ class PEFileCollector(FileSystemEventHandler):
             try:
                 size = Path(path).stat().st_size
             except FileNotFoundError:
-                return False  # genuinely gone (e.g. temp download artifact cleaned up)
+                # genuinely gone (e.g. temp download artifact cleaned up)
+                return False
             except OSError:
                 # Transient lock -- e.g. Windows Defender / another process
                 # briefly holding the file right after it's written. Don't
@@ -481,16 +492,20 @@ class PEFileCollector(FileSystemEventHandler):
         self._last_scanned[path] = now
 
         if not self._wait_until_stable(path):
-            logger.info("[ember_collector] Skipped (file never stabilised): %s", path)
+            logger.info(
+                "[ember_collector] Skipped (file never stabilised): %s", path)
             return
         try:
             vector, meta = ember_features.extract_from_path(path)
         except ValueError as exc:
-            logger.debug("[ember_collector] Skipped (not a valid PE): %s (%s)", path, exc)
+            logger.debug(
+                "[ember_collector] Skipped (not a valid PE): %s (%s)", path, exc)
             return
         except Exception as exc:
-            logger.error("[ember_collector] Failed to extract features from %s: %s", path, exc)
-            collector_registry.record_error("pe_file", f"Failed to extract features from {path}: {exc}")
+            logger.error(
+                "[ember_collector] Failed to extract features from %s: %s", path, exc)
+            collector_registry.record_error(
+                "pe_file", f"Failed to extract features from {path}: {exc}")
             return
 
         if len(vector) != len(self._feature_names):
@@ -609,7 +624,8 @@ class HDFSLogCollector(FileSystemEventHandler):
     def on_modified(self, event: FileSystemEvent) -> None:
         if event.is_directory:
             return
-        path = os.fsdecode(event.src_path) if isinstance(event.src_path, bytes) else event.src_path
+        path = os.fsdecode(event.src_path) if isinstance(
+            event.src_path, bytes) else event.src_path
         try:
             with open(path, "r", errors="ignore") as f:
                 f.seek(self._offsets.get(path, 0))
@@ -623,7 +639,7 @@ class HDFSLogCollector(FileSystemEventHandler):
 
 
 # ===========================================================================
-# 6. Zero-Day collector -> event_id, process_name, user_name, ip
+# 6. Zero-Day collector -> event_id, process_name, user_name, ip, pid
 # ===========================================================================
 
 class ZeroDayEventCollector:
@@ -641,7 +657,11 @@ class ZeroDayEventCollector:
     Windows Event IDs or synthetic labels, then match that exactly.
     """
 
-    def __init__(self, on_event: Callable[[str, str, str, str], None], seed_initial: bool = True):
+    def __init__(
+        self,
+        on_event: Callable[..., None],
+        seed_initial: bool = True,
+    ):
         self._callback = on_event
         self._seen_pids: set = set(psutil.pids()) if seed_initial else set()
         self._stop = threading.Event()
@@ -673,7 +693,8 @@ class ZeroDayEventCollector:
                             pass
                         event_id = "4688" if IS_WINDOWS else "PROC_CREATE"
                         collector_registry.record_success("zero_day", 1)
-                        self._callback(event_id, process_name, user_name, ip)
+                        self._callback(event_id, process_name,
+                                       user_name, ip, pid)
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         continue
                 self._seen_pids = current_pids
@@ -702,10 +723,17 @@ if __name__ == "__main__":
     engine = ThreatFusionEngine()
 
     # --- Zero-Day: cross-platform, easiest to demo live ---
-    def handle_zeroday_event(event_id, process_name, user_name, ip):
-        score = engine.score_windows_event(event_id, process_name, user_name, ip)
+    def handle_zeroday_event(
+        event_id, process_name, user_name, ip, pid=None
+    ):
+        score = engine.score_windows_event(
+            event_id, process_name, user_name, ip
+        )
         verdict = engine.get_verdict(score) if score is not None else "N/A"
-        print(f"[zero_day] {process_name} ({user_name}@{ip}) -> {score} ({verdict})")
+        print(
+            f"[zero_day] {process_name} ({user_name}@{ip}) "
+            f"pid={pid} -> {score} ({verdict})"
+        )
 
     zday = ZeroDayEventCollector(on_event=handle_zeroday_event)
     zday.start(poll_interval=2.0)
@@ -718,7 +746,8 @@ if __name__ == "__main__":
             for flow in net_collector.poll_once():
                 score = engine.score_network_flow(flow)
                 if score is not None:
-                    print(f"[cicids] {flow['Destination Port']} -> {score} ({engine.get_verdict(score)})")
+                    print(
+                        f"[cicids] {flow['Destination Port']} -> {score} ({engine.get_verdict(score)})")
             time.sleep(5)
 
     threading.Thread(target=network_loop, daemon=True).start()

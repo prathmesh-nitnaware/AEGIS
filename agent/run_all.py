@@ -41,6 +41,7 @@ in functions now so the orchestrator can decide, per-OS, which ones to
 call, instead of this file unconditionally calling all of them.
 """
 from __future__ import annotations
+import socket
 
 import argparse
 import json
@@ -78,7 +79,8 @@ from orchestration.telemetry_registry import collectors_for_platform  # noqa: E4
 # ---------------------------------------------------------------------------
 # EDIT THESE PATHS for your machine before running EMBER / HDFS collectors
 # ---------------------------------------------------------------------------
-PE_WATCH_DIR = r"C:\Users\%USERNAME%\Downloads"   # Windows-style; adjust for Linux paths as needed
+# Windows-style; adjust for Linux paths as needed
+PE_WATCH_DIR = r"C:\Users\%USERNAME%\Downloads"
 HDFS_LOG_PATH = str(_HERE / "test.log")
 
 # ---------------------------------------------------------------------------
@@ -95,9 +97,9 @@ AEGIS_MANAGEMENT_PORTS = {5432, 8000, 5173, 5174, 5555, 5556, 6379}
 
 # Resolve all local IP addresses on this host (loopback + LAN adapter IPs)
 # to correctly classify internal host communications (e.g. backend <-> PostgreSQL)
-import socket
 try:
-    LOCAL_IPS = set(socket.gethostbyname_ex(socket.gethostname())[2]) | {"127.0.0.1", "::1", "localhost", "0.0.0.0", ""}
+    LOCAL_IPS = set(socket.gethostbyname_ex(socket.gethostname())[2]) | {
+        "127.0.0.1", "::1", "localhost", "0.0.0.0", ""}
 except Exception:
     LOCAL_IPS = {"127.0.0.1", "::1", "localhost", "0.0.0.0", ""}
 
@@ -118,7 +120,7 @@ parser.add_argument(
     help="Agent ID identifier for peer voting and telemetry (default: agent-host-local).",
 )
 parser.add_argument(
-    "--command-node", dest="command_node_url", default="http://127.0.0.1:8000",
+    "--command-node", dest="command_node_url", default="http://192.168.0.102:8000",
     help="URL of central command node (default: http://127.0.0.1:8000).",
 )
 args, _ = parser.parse_known_args()
@@ -151,10 +153,12 @@ if getattr(args, "p2p_port", 0) > 0:
         _p2p_node = P2PMeshNode(
             agent_id=getattr(args, "agent_id", "agent-host-local"),
             bind_port=args.p2p_port,
-            command_node_url=getattr(args, "command_node_url", "http://127.0.0.1:8000"),
+            command_node_url=getattr(
+                args, "command_node_url", "http://192.168.0.102:8000"),
         )
         _p2p_node.start()
-        print(f"[run_all] P2P Wire Mesh node listening on UDP port {args.p2p_port}")
+        print(
+            f"[run_all] P2P Wire Mesh node listening on UDP port {args.p2p_port}")
     except Exception as exc:
         print(f"[run_all] Warning: P2P Wire Mesh start failed: {exc}")
 
@@ -226,7 +230,8 @@ def _trigger_peer_voting_async(model: str, score: float, verdict: str, extra: di
     vote_id = str(uuid.uuid4())[:8]
 
     def _dispatch_vote():
-        print(f"[peer_voting] Triggering peer vote for {model} ({event_type}) threat={score:.3f} [{verdict}] vote_id={vote_id}")
+        print(
+            f"[peer_voting] Triggering peer vote for {model} ({event_type}) threat={score:.3f} [{verdict}] vote_id={vote_id}")
         # A. Dispatch via P2P Mesh if active
         if _p2p_node is not None:
             try:
@@ -254,7 +259,7 @@ def _trigger_peer_voting_async(model: str, score: float, verdict: str, extra: di
                 "target_file": extra.get("file_path") or extra.get("filename"),
             }
             req = urllib.request.Request(
-                f"{getattr(args, 'command_node_url', 'http://127.0.0.1:8000').rstrip('/')}/api/centralized/vote",
+                f"{getattr(args, 'command_node_url', 'http://192.168.0.102:8000').rstrip('/')}/api/centralized/vote",
                 data=json.dumps(payload, default=str).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
             )
@@ -270,7 +275,7 @@ def _post_event_async(event_payload: dict):
         try:
             import urllib.request
             req = urllib.request.Request(
-                "http://127.0.0.1:8000/api/telemetry",
+                "http://192.168.0.102:8000/api/telemetry",
                 data=json.dumps(event_payload, default=str).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
             )
@@ -283,7 +288,7 @@ def _post_event_async(event_payload: dict):
 def save_event(model: str, score: Optional[float], verdict: str, **extra):
     """Append one scored event as a JSON line to telemetry_scores.jsonl and POST to backend API."""
     ts = datetime.now(timezone.utc).isoformat()
-    
+
     # Analytical precision: store exact float or None without destructive rounding
     raw_score = float(score) if score is not None else None
 
@@ -351,13 +356,31 @@ _running_handles: dict = {}
 # ===========================================================================
 
 def start_zero_day() -> None:
-    def handle_zeroday_event(event_id, process_name, user_name, ip):
-        score = engine.score_windows_event(event_id, process_name, user_name, ip)
+    def handle_zeroday_event(
+        event_id, process_name, user_name, ip, pid=None
+    ):
+        score = engine.score_windows_event(
+            event_id, process_name, user_name, ip
+        )
         if score is None:
             return
+
         verdict = engine.get_verdict(score)
-        print(f"[zero_day]   {process_name:<30} ({user_name}@{ip}) -> {score:.3f} ({verdict})")
-        save_event("zero_day", score, verdict, process_name=process_name, user_name=user_name, ip=ip)
+        print(
+            f"[zero_day]   {process_name:<30} "
+            f"({user_name}@{ip}) pid={pid} "
+            f"-> {score:.3f} ({verdict})"
+        )
+
+        save_event(
+            "zero_day",
+            score,
+            verdict,
+            pid=pid,
+            process_name=process_name,
+            user_name=user_name,
+            ip=ip,
+        )
 
     zday = ZeroDayEventCollector(on_event=handle_zeroday_event)
     zday.start(poll_interval=2.0)
@@ -373,7 +396,8 @@ def start_zero_day() -> None:
 def start_cicids() -> None:
     # Captures all network flows without dropping packets, ensuring 100% full-telemetry visibility.
     net_collector = ScapyFlowCollector(flow_timeout=5.0)
-    net_collector.start()  # raises if scapy/privileges unavailable -- caught by collector_manager
+    # raises if scapy/privileges unavailable -- caught by collector_manager
+    net_collector.start()
     print("[run_all] CICIDS scapy sniffer started (full capture; intelligent loopback IPC & maturity classification enabled).")
     _running_handles["cicids"] = net_collector
 
@@ -436,8 +460,10 @@ def start_ember() -> None:
         if score is not None:
             verdict = engine.get_verdict(score)
             fname = PureWindowsPath(meta["file_path"]).name
-            print(f"[ember]      {fname:<25} sha256={meta['sha256'][:12]}... -> {score:.3f} ({verdict})")
-            save_event("ember", score, verdict, file_path=meta["file_path"], sha256=meta["sha256"])
+            print(
+                f"[ember]      {fname:<25} sha256={meta['sha256'][:12]}... -> {score:.3f} ({verdict})")
+            save_event("ember", score, verdict,
+                       file_path=meta["file_path"], sha256=meta["sha256"])
 
     pe_dir = Path(PE_WATCH_DIR.replace("%USERNAME%", Path.home().name))
     if not pe_dir.exists():
@@ -479,7 +505,8 @@ def start_hdfs() -> None:
     hdfs_collector = HDFSLogCollector(on_block_text=handle_block_text)
     hdfs_collector.start_flush_thread()
     hdfs_observer = Observer()
-    hdfs_observer.schedule(hdfs_collector, path=str(hdfs_path.parent), recursive=False)
+    hdfs_observer.schedule(hdfs_collector, path=str(
+        hdfs_path.parent), recursive=False)
     hdfs_observer.start()
     print(f"[run_all] HDFS collector watching: {hdfs_path}")
     _running_handles["hdfs"] = hdfs_observer
@@ -502,11 +529,12 @@ def start_windows_advanced() -> None:
 
     def handle_sysmon_event(ev: dict):
         aggregator.process_event(ev)
-        
+
         # Score process creations in SHADOW MODE
         if ev.get("event_id") == 1:
             guid = ev.get("process_guid")
-            
+            if not isinstance(guid, str) or not guid:
+                return
             # V2 Shadow Scoring
             feats_v2 = aggregator.get_features(guid)
             if feats_v2 is not None:
@@ -514,9 +542,11 @@ def start_windows_advanced() -> None:
                 if score_v2 is not None:
                     threshold_v2 = 0.90
                     if engine._win_v2_payload is not None:
-                        threshold_v2 = engine._win_v2_payload.get("threshold", 0.90)
+                        threshold_v2 = engine._win_v2_payload.get(
+                            "threshold", 0.90)
                     verdict_v2 = "Attack" if score_v2 >= threshold_v2 else "Normal"
-                    print(f"[windows_v2_shadow] pid={ev.get('pid')} -> {score_v2:.3f} ({verdict_v2})")
+                    print(
+                        f"[windows_v2_shadow] pid={ev.get('pid')} -> {score_v2:.3f} ({verdict_v2})")
                     save_event(
                         "windows_advanced_v2", score_v2, verdict_v2,
                         model_version="v2",
@@ -526,7 +556,8 @@ def start_windows_advanced() -> None:
                         process_name=ev.get("image"),
                         parent_process_name=ev.get("parent_image"),
                         command_line=ev.get("command_line", ""),
-                        network_conn_count=feats_v2[5] if len(feats_v2) > 5 else 0.0,
+                        network_conn_count=feats_v2[5] if len(
+                            feats_v2) > 5 else 0.0,
                         features=feats_v2,
                         shadow=True
                     )
@@ -538,9 +569,11 @@ def start_windows_advanced() -> None:
                 if score_v3 is not None:
                     threshold_v3 = 0.90
                     if engine._win_v3_payload is not None:
-                        threshold_v3 = engine._win_v3_payload.get("threshold", 0.90)
+                        threshold_v3 = engine._win_v3_payload.get(
+                            "threshold", 0.90)
                     verdict_v3 = "Attack" if score_v3 >= threshold_v3 else "Normal"
-                    print(f"[windows_v3_shadow] pid={ev.get('pid')} -> {score_v3:.3f} ({verdict_v3})")
+                    print(
+                        f"[windows_v3_shadow] pid={ev.get('pid')} -> {score_v3:.3f} ({verdict_v3})")
                     save_event(
                         "windows_advanced_v3", score_v3, verdict_v3,
                         model_version="v3",
@@ -552,9 +585,11 @@ def start_windows_advanced() -> None:
                         process_name=ev.get("image"),
                         parent_process_name=ev.get("parent_image"),
                         command_line=ev.get("command_line", ""),
-                        command_line_length=len(ev.get("command_line", "") or ""),
+                        command_line_length=len(
+                            ev.get("command_line", "") or ""),
                         integrity_level=ev.get("integrity_level"),
-                        network_conn_count=feats_v3[5] if len(feats_v3) > 5 else 0.0,
+                        network_conn_count=feats_v3[5] if len(
+                            feats_v3) > 5 else 0.0,
                         features=feats_v3,
                         shadow=True
                     )
@@ -566,9 +601,11 @@ def start_windows_advanced() -> None:
                 if score_cand is not None:
                     threshold_cand = 0.90
                     if engine._win_v3_candidate_payload is not None:
-                        threshold_cand = engine._win_v3_candidate_payload.get("threshold", 0.90)
+                        threshold_cand = engine._win_v3_candidate_payload.get(
+                            "threshold", 0.90)
                     verdict_cand = "Attack" if score_cand >= threshold_cand else "Normal"
-                    print(f"[windows_v3_candidate_shadow] pid={ev.get('pid')} -> {score_cand:.3f} ({verdict_cand})")
+                    print(
+                        f"[windows_v3_candidate_shadow] pid={ev.get('pid')} -> {score_cand:.3f} ({verdict_cand})")
                     save_event(
                         "windows_advanced_v3_candidate", score_cand, verdict_cand,
                         model_version="v3_candidate",
@@ -580,9 +617,11 @@ def start_windows_advanced() -> None:
                         process_name=ev.get("image"),
                         parent_process_name=ev.get("parent_image"),
                         command_line=ev.get("command_line", ""),
-                        command_line_length=len(ev.get("command_line", "") or ""),
+                        command_line_length=len(
+                            ev.get("command_line", "") or ""),
                         integrity_level=ev.get("integrity_level"),
-                        network_conn_count=feats_cand[5] if len(feats_cand) > 5 else 0.0,
+                        network_conn_count=feats_cand[5] if len(
+                            feats_cand) > 5 else 0.0,
                         features=feats_cand,
                         shadow=True
                     )
@@ -597,13 +636,17 @@ def start_windows_advanced() -> None:
                 for pid in win_collector.get_active_pids():
                     seq = win_collector.get_sequence(pid)
                     if len(seq) >= 5:
-                        score = engine.score_process_event(api_call_sequence=seq)
+                        score = engine.score_process_event(
+                            api_call_sequence=seq)
                         if score is not None:
                             verdict = engine.get_verdict(score)
-                            print(f"[windows_adv] pid={pid} seq_len={len(seq)} -> {score:.3f} ({verdict})")
-                            save_event("windows_advanced", score, verdict, pid=pid, sequence_len=len(seq))
+                            print(
+                                f"[windows_adv] pid={pid} seq_len={len(seq)} -> {score:.3f} ({verdict})")
+                            save_event("windows_advanced", score,
+                                       verdict, pid=pid, sequence_len=len(seq))
                         else:
-                            print(f"[windows_adv] pid={pid} seq_len={len(seq)} -> UNAVAILABLE (incompatible telemetry)")
+                            print(
+                                f"[windows_adv] pid={pid} seq_len={len(seq)} -> UNAVAILABLE (incompatible telemetry)")
                             save_event(
                                 "windows_advanced", None, "UNAVAILABLE", pid=pid, sequence_len=len(seq),
                                 status="quarantined",
