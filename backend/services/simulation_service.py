@@ -35,75 +35,33 @@ _state_lock = threading.Lock()
 
 
 def get_available_targets() -> List[Dict[str, Any]]:
-    """Returns list of active agent nodes and chain targets available for exploitation."""
-    targets = [
-        {
-            "id": "node1-linux",
-            "name": "Linux App Server (node-1)",
-            "os": "Ubuntu 22.04 LTS",
-            "ip": "10.0.0.10",
-            "services": ["SSH (22)", "HTTP (80)", "Gunicorn (8000)"],
-            "vulnerabilities": ["CVE-2023-4911 (Looney Tunables)", "Weak SSH Passwords", "Meterpreter RCE"],
-            "status": "ONLINE",
-        },
-        {
-            "id": "node2-windows",
-            "name": "Windows Workstation (node-2)",
-            "os": "Windows 11 Enterprise",
-            "ip": "10.0.0.20",
-            "services": ["RDP (3389)", "SMB (445)", "WinRM (5985)"],
-            "vulnerabilities": ["Ransomware PE Dropper", "VSS Shadow Wipe", "Memory Injection"],
-            "status": "ONLINE",
-        },
-        {
-            "id": "node3-database",
-            "name": "Distributed DB Node (node-3)",
-            "os": "Debian 12 Bookworm",
-            "ip": "10.0.0.30",
-            "services": ["PostgreSQL (5432)", "Redis (6379)"],
-            "vulnerabilities": ["Heartbeat Tampering", "Agent Sabotage", "Telemetry Drop"],
-            "status": "ONLINE",
-        },
-        {
-            "id": "node4-gateway",
-            "name": "Edge Ingress Gateway (node-4)",
-            "os": "Alpine Linux 3.19",
-            "ip": "10.0.0.1",
-            "services": ["Nginx (80/443)", "BGP Wire (179)"],
-            "vulnerabilities": ["TCP SYN Flood DDoS", "Horizontal PortScan", "Graceful Drain Abuse"],
-            "status": "ONLINE",
-        },
-        {
-            "id": "swarm-broadcast",
-            "name": "Swarm Broadcast (All Swarm Nodes)",
-            "os": "Multi-Platform Swarm",
-            "ip": "10.0.0.0/24",
-            "services": ["P2P Wire Mesh Consensus (9001-9010)"],
-            "vulnerabilities": ["Full Kill-Chain Campaign", "Byzantine Quorum Stress"],
-            "status": "ONLINE",
-        },
-    ]
-
-    # Dynamically inject registered live agents from central repo if available
+    """Return real heartbeat-registered agents only; never fabricate demo targets."""
     try:
-        from backend.telemetry_api import central_repo
-        if central_repo:
-            all_agents = central_repo.get_all_agents()
-            for agent_id, agent_info in all_agents.items():
-                if not any(t["id"] == agent_id for t in targets):
-                    targets.append({
-                        "id": agent_id,
-                        "name": f"Agent {agent_id}",
-                        "os": agent_info.get("os", "Linux/Windows"),
-                        "ip": agent_info.get("ip", "127.0.0.1"),
-                        "services": ["AEGIS Agent Telemetry"],
-                        "vulnerabilities": ["Live Target Ingestion"],
-                        "status": "ONLINE" if not agent_info.get("alarm_raised") else "ALARMED",
-                    })
+        # Use the same live heartbeat registry as the API target endpoint.
+        from backend.telemetry_api import silence_detector, agent_connection_metadata
+        now = time.time()
+        targets = []
+        for row in silence_detector.list_agents():
+            aid = row.get("agent_id")
+            meta = agent_connection_metadata.get(aid, {})
+            age = float(row.get("silence_duration", now - float(row.get("last_seen", 0))))
+            raw_status = str(row.get("status", "unknown")).upper()
+            online = age <= silence_detector.silence_threshold and raw_status not in {"OFFLINE_GRACEFUL", "OFFLINE", "DISCONNECTED"}
+            targets.append({
+                "id": aid,
+                "name": f"AEGIS Agent {aid}",
+                "os": meta.get("os", "Unknown"),
+                "ip": meta.get("ip") or "Unknown (source address unavailable)",
+                "last_seen": row.get("last_seen"),
+                "silence_duration": age,
+                "services": ["AEGIS telemetry"],
+                "status": "ONLINE" if online else ("ALARMED" if row.get("alarm_raised") else "OFFLINE"),
+                "selectable": online and bool(meta.get("ip")),
+            })
+        return targets
     except Exception:
-        pass
-
-    return targets
+        logger.exception("Unable to build live agent target list")
+        return []
 
 
 def get_simulation_status() -> Dict[str, Any]:
@@ -113,10 +71,12 @@ def get_simulation_status() -> Dict[str, Any]:
 
 def reset_simulation_state():
     with _state_lock:
-        _simulation_state["is_running"] = False
+        if _simulation_state["is_running"]:
+            return False
         _simulation_state["current_scenario"] = None
         _simulation_state["progress"] = 0
         _simulation_state["logs"] = []
+        return True
 
 
 def _append_log(message: str, level: str = "INFO", step: Optional[int] = None, data: Optional[dict] = None):
@@ -146,6 +106,31 @@ def _append_log(message: str, level: str = "INFO", step: Optional[int] = None, d
         pass
 
 
+
+def _publish_lab_event(target_id: str, scenario: str, event_type: str, threat_score: float = 0.72) -> None:
+    """Publish clearly labelled synthetic lab telemetry; never claim live compromise."""
+    event = {
+        "timestamp": int(time.time() * 1000000),
+        "agent_id": target_id,
+        "target_agent_id": target_id,
+        "event_type": event_type,
+        "scenario": scenario,
+        "process": "aegis-lab-simulation",
+        "source": "red_team_dashboard_simulation",
+        "simulation": True,
+        "threat_score": threat_score,
+        "predicted_class": "SIMULATED_TEST_EVENT",
+        "message": f"Synthetic {scenario} test event for dashboard integration validation",
+    }
+    try:
+        from backend.telemetry_api import add_event, central_repo, publish_event
+        add_event(event)
+        central_repo.add_telemetry(event)
+        publish_event(event)
+    except Exception:
+        logger.exception("Unable to publish synthetic lab telemetry")
+
+
 def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, custom_config: Optional[dict] = None):
     from experiments.simulations import (
         simulate_linux_attacks,
@@ -163,35 +148,38 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
         _simulation_state["progress"] = 5
         _simulation_state["logs"] = []
 
-    _append_log(f"⚔️ [C2 DISPATCH] Initializing Attack Vector: [{scenario.upper()}] against Target [{target_id}] ({target_ip})...", "INFO", step=1)
+    _append_log(f"⚔️ [C2 DISPATCH] Initializing LAB SCENARIO: [{scenario.upper()}] against Target [{target_id}] ({target_ip})...", "INFO", step=1)
 
     try:
         if scenario == "linux":
-            _append_log(f"[*] Dispatching Exploit: Hydra SSH Brute-Force & ptrace() Memory Injection to {target_ip}...", "INFO", step=1)
+            _append_log(f"[*] Starting the existing Linux telemetry simulation for registered agent {target_id} ({target_ip})...", "INFO", step=1)
             time.sleep(0.5)
             with _state_lock:
                 _simulation_state["progress"] = 25
-            _append_log("[*] Injected meterpreter shell payload into PID 4592...", "WARNING", step=2)
+            _append_log("[*] Preparing synthetic attack telemetry (no shell payload is executed)...", "WARNING", step=2)
             time.sleep(0.5)
+            simulate_linux_attacks.AGENT_ID = target_id
             simulate_linux_attacks.run_simulation()
             with _state_lock:
                 _simulation_state["progress"] = 100
-            _append_log(f"[+] Exploit Execution Finished on {target_id}. Victim defense triggered quorum consensus & process termination.", "SUCCESS", step=4)
+            _append_log(f"[+] Linux attack telemetry simulation finished for {target_id}; verify the resulting alert in the Blue Team dashboard.", "SUCCESS", step=4)
 
-        elif scenario == "windows":
-            _append_log(f"[*] Infiltrating {target_id} ({target_ip}): Stage 1 PE Dropper + VSS Shadow Deletion...", "INFO", step=1)
+        elif scenario in {"windows", "file"}:
+            _append_log(f"[*] Running synthetic suspicious-file telemetry scenario for registered agent {target_id} ({target_ip})...", "INFO", step=1)
             time.sleep(0.5)
             with _state_lock:
                 _simulation_state["progress"] = 25
-            _append_log("[*] Executing `vssadmin delete shadows /all /quiet` and high-entropy write burst (7.98 bits/byte)...", "WARNING", step=2)
+            _append_log("[*] Generating ransomware-like lab telemetry only; no destructive command is executed...", "WARNING", step=2)
             time.sleep(0.5)
+            simulate_windows_ransomware.AGENT_ID = target_id
             simulate_windows_ransomware.run_simulation()
+            _publish_lab_event(target_id, "suspicious_file", "file_activity_simulation", 0.72)
             with _state_lock:
                 _simulation_state["progress"] = 100
-            _append_log(f"[+] Ransomware simulation finished on {target_id}. Dropper quarantined & host network isolated by AEGIS agent.", "SUCCESS", step=4)
+            _append_log(f"[+] Synthetic suspicious-file event published for {target_id}. No file was encrypted and no host was isolated.", "SUCCESS", step=4)
 
         elif scenario == "sabotage":
-            _append_log(f"[*] Target Sabotage: Terminating AEGIS heartbeat daemon on {target_id} ({target_ip})...", "WARNING", step=1)
+            _append_log(f"[*] Running a heartbeat-silence simulation associated with {target_id} ({target_ip}); no process will be terminated...", "WARNING", step=1)
             time.sleep(0.5)
             with _state_lock:
                 _simulation_state["progress"] = 30
@@ -200,6 +188,16 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
             with _state_lock:
                 _simulation_state["progress"] = 100
             _append_log(f"[+] Silence-as-Alarm triggered on {target_id}. Escalated to SOC incident queue within 15 seconds.", "SUCCESS", step=4)
+
+        elif scenario == "consensus":
+            _append_log(f"[*] Publishing a labelled synthetic threat event for consensus-path demonstration on {target_id}...", "INFO", step=1)
+            _publish_lab_event(target_id, "multi_node_consensus", "consensus_simulation", 0.88)
+            with _state_lock:
+                _simulation_state["progress"] = 50
+            time.sleep(0.5)
+            _append_log("[!] Synthetic event was published. This does not prove that distributed quorum voting completed; verify the P2P/consensus records separately.", "WARNING", step=2)
+            with _state_lock:
+                _simulation_state["progress"] = 100
 
         elif scenario == "graceful":
             _append_log(f"[*] Transmitting Planned Maintenance / Clean Reboot Signal to {target_id}...", "INFO", step=1)
@@ -212,7 +210,7 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
             _append_log(f"[+] Clean reboot verified on {target_id}. Suppressed false alarms via active maintenance window.", "SUCCESS", step=4)
 
         elif scenario == "pcap_ddos":
-            _append_log(f"[*] Launching Network DDoS SYN Flood against {target_ip}:80 at 200 packets/sec...", "WARNING", step=1)
+            _append_log(f"[*] Replaying the stored SYN-flood PCAP for sensor validation (selected agent: {target_id})...", "WARNING", step=1)
             from backend.services.pcap_service import pcap_service
             pcap_service.start_replay("syn_flood_ddos.pcap", speed_multiplier=10.0)
             with _state_lock:
@@ -220,10 +218,10 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
             time.sleep(2.0)
             with _state_lock:
                 _simulation_state["progress"] = 100
-            _append_log(f"[+] DDoS SYN Flood blast completed against {target_ip}. Victim CICIDS LightGBM flagged 94.2% threat score.", "SUCCESS", step=4)
+            _append_log(f"[+] PCAP replay started for IDS validation; this replay is not sent directly to the selected target and detection must be verified separately.", "SUCCESS", step=4)
 
         elif scenario == "pcap_portscan":
-            _append_log(f"[*] Launching Horizontal TCP Port Scan Sweep across 35+ critical ports on {target_ip}...", "INFO", step=1)
+            _append_log(f"[*] Replaying the stored port-scan PCAP for sensor validation (selected agent: {target_id})...", "INFO", step=1)
             from backend.services.pcap_service import pcap_service
             pcap_service.start_replay("port_scan_recon.pcap", speed_multiplier=10.0)
             with _state_lock:
@@ -231,10 +229,10 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
             time.sleep(2.0)
             with _state_lock:
                 _simulation_state["progress"] = 100
-            _append_log(f"[+] PortScan Recon sweep completed against {target_ip}. Recon signature extracted and tagged in SOC ATT&CK matrix.", "SUCCESS", step=4)
+            _append_log(f"[+] Port-scan PCAP replay started for IDS validation; detection must be verified in the Blue Team dashboard.", "SUCCESS", step=4)
 
         elif scenario == "pcap_hydra":
-            _append_log(f"[*] Initiating Multi-Threaded SSH Password Dictionary Brute Force against {target_ip}:22...", "WARNING", step=1)
+            _append_log(f"[*] Replaying the stored SSH brute-force PCAP for sensor validation (selected agent: {target_id})...", "WARNING", step=1)
             from backend.services.pcap_service import pcap_service
             pcap_service.start_replay("hydra_ssh_bruteforce.pcap", speed_multiplier=10.0)
             with _state_lock:
@@ -242,23 +240,28 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
             time.sleep(2.0)
             with _state_lock:
                 _simulation_state["progress"] = 100
-            _append_log(f"[+] Hydra SSH Credential guessing burst completed against {target_ip}. SSH-Bruteforce vector flagged.", "SUCCESS", step=4)
+            _append_log(f"[+] SSH brute-force PCAP replay started for IDS validation; this is recorded traffic, not live credential guessing.", "SUCCESS", step=4)
 
         elif scenario == "all":
             _append_log(f"⚔️ [CAMPAIGN] Launching Multi-Stage Automated Kill-Chain Campaign across Swarm ({target_ip})...", "INFO", step=1)
             scenarios = [
                 ("Phase 1: PortScan Reconnaissance", "pcap_portscan", 20),
                 ("Phase 2: Linux SSH Brute-Force & Meterpreter", "linux", 40),
-                ("Phase 3: Windows Ransomware Dropper", "windows", 65),
+                ("Phase 3: Suspicious File Simulation", "file", 65),
                 ("Phase 4: Network SYN Flood DDoS Attack", "pcap_ddos", 85),
                 ("Phase 5: Agent Sabotage / Silence Infiltration", "sabotage", 100),
             ]
             for title, sc_name, prog in scenarios:
                 _append_log(f"[*] Executing Campaign Stage: {title}...", "INFO")
                 if sc_name == "linux":
+                    simulate_linux_attacks.AGENT_ID = target_id
                     simulate_linux_attacks.run_simulation()
-                elif sc_name == "windows":
+                elif sc_name in {"windows", "file"}:
+                    simulate_windows_ransomware.AGENT_ID = target_id
                     simulate_windows_ransomware.run_simulation()
+                    _publish_lab_event(target_id, "suspicious_file", "file_activity_simulation", 0.72)
+                elif sc_name == "consensus":
+                    _publish_lab_event(target_id, "multi_node_consensus", "consensus_simulation", 0.88)
                 elif sc_name == "sabotage":
                     simulate_silence_tamper.run_simulation()
                 elif sc_name.startswith("pcap_"):
@@ -268,7 +271,7 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
                 with _state_lock:
                     _simulation_state["progress"] = prog
                 time.sleep(1.2)
-            _append_log("🎯 [CAMPAIGN COMPLETE] Full Kill-Chain Campaign executed across all target nodes successfully!", "SUCCESS", step=5)
+            _append_log("🎯 [CAMPAIGN COMPLETE] Campaign simulation sequence finished. Confirm each stage and detection in the Blue Team dashboard; completion alone is not proof of compromise.", "SUCCESS", step=5)
 
         else:
             _append_log(f"Unknown scenario identifier: {scenario}", "ERROR")
@@ -278,6 +281,9 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
             "target": target_id,
             "target_ip": target_ip,
             "status": "COMPLETED",
+            "execution_type": "SIMULATION_OR_PCAP_REPLAY",
+            "detection_confirmed": False,
+            "consensus_confirmed": False,
             "duration": round(time.time() - _simulation_state["start_time"], 2),
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
