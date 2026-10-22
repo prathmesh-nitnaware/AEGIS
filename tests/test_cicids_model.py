@@ -179,6 +179,44 @@ class TestScapyFlowCollectorPortFiltering(unittest.TestCase):
         collector._on_packet(pkt_443)
         self.assertEqual(len(collector._flows), 1, "Legitimate packet was incorrectly dropped")
 
+    def test_external_packets_on_ignored_ports_are_retained(self):
+        try:
+            from scapy.all import IP, TCP
+        except ImportError:
+            self.skipTest("Scapy not installed")
+
+        from agent.scapy_flow_collector import ScapyFlowCollector
+        # Default filter_loopback_only=True
+        collector = ScapyFlowCollector(ignored_ports={8000}, filter_loopback_only=True)
+
+        # External attacker targeting port 8000 from LAN IP
+        pkt_external_8000 = IP(src="192.168.1.100", dst="192.168.1.50") / TCP(sport=45678, dport=8000, flags="S")
+        collector._on_packet(pkt_external_8000)
+        self.assertEqual(len(collector._flows), 1, "External attack targeting port 8000 was mistakenly dropped!")
+
+    def test_ignored_subnets_filtering(self):
+        try:
+            from scapy.all import IP, TCP
+        except ImportError:
+            self.skipTest("Scapy not installed")
+
+        from agent.scapy_flow_collector import ScapyFlowCollector
+        collector = ScapyFlowCollector(
+            ignored_ports={8000},
+            ignored_subnets=["10.0.50.0/24"],
+            filter_loopback_only=False,
+        )
+
+        # Traffic completely within management subnet -> dropped
+        pkt_mgmt = IP(src="10.0.50.15", dst="10.0.50.2") / TCP(sport=51234, dport=8000, flags="S")
+        collector._on_packet(pkt_mgmt)
+        self.assertEqual(len(collector._flows), 0, "Internal management subnet traffic was not dropped")
+
+        # Traffic originating outside management subnet targeting port 8000 -> captured!
+        pkt_external = IP(src="172.16.0.5", dst="10.0.50.2") / TCP(sport=51234, dport=8000, flags="S")
+        collector._on_packet(pkt_external)
+        self.assertEqual(len(collector._flows), 1, "External traffic crossing into management subnet was dropped")
+
 
 if __name__ == "__main__":
     unittest.main()

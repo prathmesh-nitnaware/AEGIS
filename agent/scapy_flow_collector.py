@@ -17,11 +17,12 @@ Windows:
 
 from __future__ import annotations
 
+import ipaddress
 import math
 import threading
 import time
 from collections import defaultdict
-from typing import Dict, List, Tuple, Optional, Set, Iterable
+from typing import Dict, List, Tuple, Optional, Set, Iterable, Union
 
 import numpy as np
 
@@ -55,17 +56,75 @@ class ScapyFlowCollector:
         idle_threshold: float = 1.0,
         iface: Optional[str] = None,
         ignored_ports: Optional[Iterable[int]] = None,
+        filter_loopback_only: bool = True,
+        ignored_subnets: Optional[Iterable[str]] = None,
     ):
         self.flow_timeout = flow_timeout
         self.idle_threshold = idle_threshold
         self.iface = iface
         self.ignored_ports: Set[int] = {int(p) for p in ignored_ports} if ignored_ports else set()
+        self.filter_loopback_only = filter_loopback_only
+
+        self._parsed_subnets: List[Union[ipaddress.IPv4Network, ipaddress.IPv6Network]] = []
+        if ignored_subnets:
+            for sub in ignored_subnets:
+                try:
+                    self._parsed_subnets.append(ipaddress.ip_network(sub, strict=False))
+                except Exception:
+                    pass
 
         self._flows: Dict[tuple, dict] = {}
         self._lock = threading.Lock()
 
         self._sniff_thread = None
         self._stop = threading.Event()
+
+    @staticmethod
+    def _is_loopback_addr(ip_str: str) -> bool:
+        """Check if an IP string is a loopback address (127.0.0.0/8 or ::1)."""
+        if not ip_str:
+            return False
+        try:
+            return ipaddress.ip_address(ip_str).is_loopback
+        except ValueError:
+            return ip_str.startswith("127.") or ip_str in ("::1", "localhost")
+
+    def _matches_ignored_subnet(self, ip_str: str) -> bool:
+        """Check if an IP string belongs to any configured ignored subnet."""
+        if not self._parsed_subnets or not ip_str:
+            return False
+        try:
+            addr = ipaddress.ip_address(ip_str)
+            return any(addr in net for net in self._parsed_subnets)
+        except ValueError:
+            return False
+
+    def _should_ignore_packet(self, src: str, sport: int, dst: str, dport: int) -> bool:
+        """
+        Determine if packet should be ignored based on port and loopback/subnet rules.
+        When filter_loopback_only is True (default), packets matching ignored_ports
+        are dropped ONLY if they are loopback/subnet management traffic. External
+        packets targeting those ports are NOT dropped.
+        """
+        if not self.ignored_ports:
+            return False
+
+        if sport not in self.ignored_ports and dport not in self.ignored_ports:
+            return False
+
+        # If not restricting to loopback/subnets, drop any matching port unconditionally
+        if not self.filter_loopback_only and not self._parsed_subnets:
+            return True
+
+        # Check loopback condition (both src and dst are loopback)
+        if self.filter_loopback_only and self._is_loopback_addr(src) and self._is_loopback_addr(dst):
+            return True
+
+        # Check ignored subnet condition (both endpoints in internal/management subnet)
+        if self._parsed_subnets and self._matches_ignored_subnet(src) and self._matches_ignored_subnet(dst):
+            return True
+
+        return False
 
     # ------------------------------------------------------------------
     # FLOW KEY
@@ -102,6 +161,8 @@ class ScapyFlowCollector:
             return
 
         ip_layer = pkt[IP]
+        src = str(ip_layer.src)
+        dst = str(ip_layer.dst)
 
         # Default packet properties
         fin = 0
@@ -130,7 +191,7 @@ class ScapyFlowCollector:
             sport = int(tcp.sport)
             dport = int(tcp.dport)
 
-            if self.ignored_ports and (sport in self.ignored_ports or dport in self.ignored_ports):
+            if self._should_ignore_packet(src, sport, dst, dport):
                 return
 
             flags = int(tcp.flags)
@@ -173,7 +234,7 @@ class ScapyFlowCollector:
             sport = int(udp.sport)
             dport = int(udp.dport)
 
-            if self.ignored_ports and (sport in self.ignored_ports or dport in self.ignored_ports):
+            if self._should_ignore_packet(src, sport, dst, dport):
                 return
 
             hdr_len = 8
@@ -188,9 +249,6 @@ class ScapyFlowCollector:
 
         else:
             return
-
-        src = ip_layer.src
-        dst = ip_layer.dst
 
         key = self._flow_key(
             src,
@@ -230,6 +288,8 @@ class ScapyFlowCollector:
                     # First observed direction
                     "fwd_key": (src, sport),
 
+                    "src_ip": src,
+                    "dst_ip": dst,
                     "dst_port": dport,
 
                     # Packet counts
@@ -1168,6 +1228,9 @@ class ScapyFlowCollector:
                     "Idle Min":
                         idle_min,
                 }
+
+                flow_dict["_src_ip"] = flow.get("src_ip", "")
+                flow_dict["_dst_ip"] = flow.get("dst_ip", "")
 
                 completed.append(
                     flow_dict

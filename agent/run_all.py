@@ -221,17 +221,28 @@ def start_zero_day() -> None:
 # ===========================================================================
 
 def start_cicids() -> None:
-    # Pass ignored_ports to drop internal telemetry / management packets immediately at the sniffer layer.
-    net_collector = ScapyFlowCollector(flow_timeout=2.0, ignored_ports=AEGIS_MANAGEMENT_PORTS)
+    # Pass ignored_ports + filter_loopback_only=True so internal dashboard polling over loopback (127.0.0.1)
+    # is dropped, while any external network attack targeting port 8000 is still captured and scored.
+    net_collector = ScapyFlowCollector(
+        flow_timeout=2.0,
+        ignored_ports=AEGIS_MANAGEMENT_PORTS,
+        filter_loopback_only=True,
+    )
     net_collector.start()  # raises if scapy/privileges unavailable -- caught by collector_manager
-    print(f"[run_all] CICIDS scapy sniffer started (real packet/byte counts; management ports {sorted(AEGIS_MANAGEMENT_PORTS)} filtered).")
+    print(f"[run_all] CICIDS scapy sniffer started (real packet/byte counts; management ports {sorted(AEGIS_MANAGEMENT_PORTS)} filtered on loopback only).")
     _running_handles["cicids"] = net_collector
 
     def network_loop():
         while True:
             for flow in net_collector.pop_completed_flows():
                 dest_port = int(flow.get('Destination Port', 0))
-                if dest_port in AEGIS_MANAGEMENT_PORTS:
+                src_ip = str(flow.get('_src_ip', ''))
+                dst_ip = str(flow.get('_dst_ip', ''))
+                is_loopback = (
+                    (src_ip.startswith("127.") or src_ip in ("::1", "localhost", "")) and
+                    (dst_ip.startswith("127.") or dst_ip in ("::1", "localhost", ""))
+                )
+                if dest_port in AEGIS_MANAGEMENT_PORTS and is_loopback:
                     continue
                 score = engine.score_network_flow(flow)
                 if score is not None:
