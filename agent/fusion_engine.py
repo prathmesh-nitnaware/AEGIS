@@ -975,13 +975,16 @@ class ThreatFusionEngine:
             # Allowlist / threshold calibration with Masquerading Protection:
             # Requires matching SYSTEM / LOCAL SERVICE context for core OS services
             core_system_services = {
-                "svchost.exe", "services.exe", "lsass.exe", "smss.exe", "csrss.exe", "dwm.exe"
+                "svchost.exe", "services.exe", "lsass.exe", "smss.exe", "csrss.exe",
+                "dwm.exe", "dllhost.exe", "runtimebroker.exe", "sihost.exe",
+                "backgroundtaskhost.exe", "taskhostw.exe", "smartscreen.exe"
             }
             standard_user_apps = {
                 "explorer.exe", "conhost.exe", "taskhostw.exe", "searchhost.exe",
                 "startmenuexperiencehost.exe", "textinputhost.exe", "ctfmon.exe",
                 "chrome.exe", "cursor.exe", "code.exe", "py.exe", "python.exe",
-                "cmd.exe", "powershell.exe", "antigravity-ide.exe"
+                "cmd.exe", "powershell.exe", "antigravity-ide.exe", "snippingtool.exe",
+                "zoom.exe", "msedgewebview2.exe", "msedge.exe", "notepad.exe"
             }
 
             p_lower = str(process_name).lower()

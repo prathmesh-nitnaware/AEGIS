@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, update, desc
@@ -65,6 +66,16 @@ async def persist_telemetry_event(
 ) -> TelemetryEvent:
     """Persist a raw telemetry event dict and return the ORM row."""
     uid = event_uid or event.get("id") or _short_id()
+    raw_ts = event.get("timestamp")
+    parsed_ts = None
+    if isinstance(raw_ts, (int, float)):
+        parsed_ts = float(raw_ts)
+    elif isinstance(raw_ts, str):
+        try:
+            parsed_ts = datetime.fromisoformat(raw_ts.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            parsed_ts = time.time()
+
     row = TelemetryEvent(
         event_uid=uid,
         agent_id=str(event.get("agent_id", event.get("agentId", "unknown"))),
@@ -75,7 +86,7 @@ async def persist_telemetry_event(
         pid=event.get("pid"),
         payload=event,
         received_at=time.time(),
-        event_timestamp=event.get("timestamp"),
+        event_timestamp=parsed_ts,
     )
     session.add(row)
     await session.flush()
