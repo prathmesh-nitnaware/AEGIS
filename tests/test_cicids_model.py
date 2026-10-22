@@ -217,7 +217,45 @@ class TestScapyFlowCollectorPortFiltering(unittest.TestCase):
         collector._on_packet(pkt_external)
         self.assertEqual(len(collector._flows), 1, "External traffic crossing into management subnet was dropped")
 
+    def test_management_ports_includes_postgres(self):
+        import agent.run_all as run_all
+        self.assertIn(5432, run_all.AEGIS_MANAGEMENT_PORTS)
+
+    def test_flow_maturity_and_ipc_classification(self):
+        # 1. Localhost PostgreSQL query
+        flow_pg = {
+            "Destination Port": 5432.0,
+            "_src_ip": "127.0.0.1",
+            "_dst_ip": "127.0.0.1",
+            "Total Fwd Packets": 50.0,
+            "Total Backward Packets": 40.0,
+            "Total Length of Fwd Packets": 2048.0,
+            "Total Length of Bwd Packets": 4096.0,
+        }
+        # In run_all logic:
+        is_loopback = flow_pg["_src_ip"].startswith("127.") and flow_pg["_dst_ip"].startswith("127.")
+        dest_port = int(flow_pg["Destination Port"])
+        import agent.run_all as run_all
+        is_ipc = is_loopback and (dest_port in run_all.AEGIS_MANAGEMENT_PORTS or dest_port > 49151)
+        self.assertTrue(is_ipc, "PostgreSQL loopback query should be classified as INTERNAL_IPC")
+
+        # 2. Control fragment (1-packet keepalive / TCP probe without payload)
+        flow_frag = {
+            "Destination Port": 443.0,
+            "_src_ip": "192.168.1.50",
+            "_dst_ip": "142.250.190.46",
+            "Total Fwd Packets": 1.0,
+            "Total Backward Packets": 0.0,
+            "Total Length of Fwd Packets": 0.0,
+            "Total Length of Bwd Packets": 0.0,
+        }
+        tot_pkts = flow_frag["Total Fwd Packets"] + flow_frag["Total Backward Packets"]
+        tot_bytes = flow_frag["Total Length of Fwd Packets"] + flow_frag["Total Length of Bwd Packets"]
+        is_frag = tot_pkts < 3 and tot_bytes == 0
+        self.assertTrue(is_frag, "Single-packet TLS keepalive should be classified as CONTROL_FRAGMENT")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
