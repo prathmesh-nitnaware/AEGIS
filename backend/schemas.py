@@ -94,6 +94,7 @@ class CentralizedVotePayload(BaseModel):
     details: Dict[str, Any] = Field(default_factory=dict)
     pid: Optional[int] = None
     target_file: Optional[str] = None
+    vote_id: Optional[str] = None
 
     def get_origin_agent_id(self) -> str:
         return self.origin_agent_id or self.agent_id or "agent-local"
@@ -122,12 +123,16 @@ class P2PConsensusPayload(BaseModel):
     raw_threat_score: float = Field(..., ge=0.0, le=1.0)
     final_weighted_score: float = Field(..., ge=0.0, le=1.0)
     severity: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "LOW"
+    response_action: Optional[str] = None
     consensus_reached: bool = False
     participating_peers: int = Field(0, ge=0)
     total_weight: float = Field(0.0, ge=0.0)
     timestamp: float = Field(default_factory=time.time)
     quorum_status: Optional[str] = None
     verdict_type: Optional[str] = None
+    peer_votes: Optional[List[Dict[str, Any]]] = None
+    quorum_needed: Optional[int] = None
+    details: Optional[Dict[str, Any]] = None
 
 
 # ===========================================================================
