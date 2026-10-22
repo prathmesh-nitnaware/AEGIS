@@ -4,7 +4,7 @@ import time
 import logging
 from typing import Annotated, Any, Dict, List, Optional, Union
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, UploadFile, File, Header, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, UploadFile, File, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.services.rbac_auth_service import rbac_auth_service
@@ -99,6 +99,8 @@ async def _persist_alarm_bg(alarm_payload: dict) -> None:
     except Exception as exc:
         logger.warning("[AEGIS DB] Failed to persist silence alarm: %s", exc)
 
+
+agent_connection_metadata: Dict[str, Dict[str, Any]] = {}
 
 silence_detector = SilenceDetector(
     silence_threshold=15.0,   # AEGIS spec default — no heartbeat for 15s → alarm
@@ -440,6 +442,7 @@ async def test_telemetry():
 @app.post("/api/heartbeat")
 async def post_heartbeat(
     payload: HeartbeatPayload,
+    request: Request,
     authorization: Optional[str] = Header(None, alias="Authorization"),
     x_agent_token: Optional[str] = Header(None, alias="X-AEGIS-Agent-Token"),
 ):
@@ -455,6 +458,14 @@ async def post_heartbeat(
         raise HTTPException(status_code=400, detail="Heartbeat timestamp outside allowed clock skew window.")
 
     data = payload.model_dump()
+    # Record the observed source address for the Red Team live-agent registry.
+    # Do not trust a client-supplied target IP for execution.
+    source_ip = request.client.host if request.client else None
+    agent_connection_metadata[payload.agent_id] = {
+        "ip": source_ip,
+        "os": data.get("os") or data.get("platform") or "Unknown",
+        "last_seen": now,
+    }
     silence_detector.record_heartbeat(data)
     await broadcast({**data, "type": "agent_heartbeat"})
     return {"status": "ok", "agent_id": payload.agent_id}
@@ -1430,9 +1441,28 @@ async def export_incident_report_pdf(incident_id: str = "INC-CURRENT-001"):
 
 @app.get("/api/attack/targets")
 async def get_attack_targets_endpoint():
-    """Returns list of active swarm nodes and target systems available for exploitation."""
-    from backend.services.simulation_service import get_available_targets
-    return get_available_targets()
+    """Return only agents actually seen through the heartbeat endpoint."""
+    now = time.time()
+    rows = silence_detector.list_agents()
+    targets = []
+    for row in rows:
+        aid = row.get("agent_id")
+        meta = agent_connection_metadata.get(aid, {})
+        age = float(row.get("silence_duration", now - float(row.get("last_seen", 0))))
+        status = str(row.get("status", "unknown")).upper()
+        online = age <= silence_detector.silence_threshold and status not in {"OFFLINE_GRACEFUL", "OFFLINE", "DISCONNECTED"}
+        targets.append({
+            "id": aid,
+            "name": f"AEGIS Agent {aid}",
+            "os": meta.get("os", "Unknown"),
+            "ip": meta.get("ip") or "Unknown (source address unavailable)",
+            "last_seen": row.get("last_seen"),
+            "silence_duration": age,
+            "services": ["AEGIS telemetry"],
+            "status": "ONLINE" if online else ("ALARMED" if row.get("alarm_raised") else "OFFLINE"),
+            "selectable": online and bool(meta.get("ip")),
+        })
+    return targets
 
 
 @app.post("/api/simulation/launch")
@@ -1444,9 +1474,24 @@ async def launch_simulation_scenario(payload: dict):
     """
     from backend.services.simulation_service import start_simulation
     scenario = payload.get("scenario", "linux")
-    target_id = payload.get("target_id", "vm1-linux")
-    target_ip = payload.get("target_ip", "10.0.0.10")
+    allowed_scenarios = {"linux", "file", "windows", "pcap_portscan", "pcap_ddos", "pcap_hydra", "sabotage", "consensus", "all"}
+    if scenario not in allowed_scenarios:
+        raise HTTPException(status_code=400, detail=f"Unsupported scenario: {scenario}")
+    target_id = payload.get("target_id")
     custom_config = payload.get("custom_config", {})
+    if not target_id:
+        raise HTTPException(status_code=400, detail="Select a registered AEGIS agent first.")
+    now = time.time()
+    live = {row.get("agent_id"): row for row in silence_detector.list_agents()}
+    row = live.get(target_id)
+    meta = agent_connection_metadata.get(target_id, {})
+    if not row or not meta.get("ip"):
+        raise HTTPException(status_code=404, detail="Target is not a registered agent with a known source IP.")
+    age = float(row.get("silence_duration", now - float(row.get("last_seen", 0))))
+    if age > silence_detector.silence_threshold or str(row.get("status", "")).upper() in {"OFFLINE_GRACEFUL", "OFFLINE", "DISCONNECTED"}:
+        raise HTTPException(status_code=409, detail="Target agent is offline or its heartbeat is stale.")
+    # Use the IP observed by the heartbeat endpoint; ignore browser-supplied target_ip.
+    target_ip = meta["ip"]
     res = start_simulation(scenario=scenario, target_id=target_id, target_ip=target_ip, custom_config=custom_config)
     return res
 
