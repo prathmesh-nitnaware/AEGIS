@@ -92,6 +92,14 @@ HDFS_LOG_PATH = str(_HERE / "test.log")
 # as benign operational telemetry (LOW) rather than false intrusion alerts.
 AEGIS_MANAGEMENT_PORTS = {5432, 8000, 5173, 5174, 5555, 5556, 6379}
 
+# Resolve all local IP addresses on this host (loopback + LAN adapter IPs)
+# to correctly classify internal host communications (e.g. backend <-> PostgreSQL)
+import socket
+try:
+    LOCAL_IPS = set(socket.gethostbyname_ex(socket.gethostname())[2]) | {"127.0.0.1", "::1", "localhost", "0.0.0.0", ""}
+except Exception:
+    LOCAL_IPS = {"127.0.0.1", "::1", "localhost", "0.0.0.0", ""}
+
 # ---------------------------------------------------------------------------
 # CLI: --os override (manual, for testing only -- auto-detect is default)
 # ---------------------------------------------------------------------------
@@ -242,19 +250,19 @@ def start_cicids() -> None:
                 total_pkts = fwd_pkts + bwd_pkts
                 total_bytes = fwd_bytes + bwd_bytes
 
-                is_loopback = (
-                    (src_ip.startswith("127.") or src_ip in ("::1", "localhost", "")) and
-                    (dst_ip.startswith("127.") or dst_ip in ("::1", "localhost", ""))
+                is_local = (
+                    (src_ip in LOCAL_IPS or src_ip.startswith("127.")) and
+                    (dst_ip in LOCAL_IPS or dst_ip.startswith("127."))
                 )
 
                 # 1. Localhost internal management & DB traffic (PostgreSQL 5432, API 8000, UI 5173/5174, P2P 5555/5556)
-                if is_loopback and (dest_port in AEGIS_MANAGEMENT_PORTS or dest_port > 49151):
+                if is_local and (dest_port in AEGIS_MANAGEMENT_PORTS or dest_port > 49151):
                     score = 0.05
                     verdict = "LOW"
                     flow_type = "INTERNAL_IPC"
 
-                # 2. Incomplete / unestablished 1-2 packet control fragments (TCP Keepalives, RST, SYN probes without payload)
-                elif total_pkts < 3 and total_bytes == 0:
+                # 2. Incomplete / unestablished control fragments (< 5 packets lack statistical variance for 78 flow features)
+                elif total_pkts < 5:
                     score = 0.05
                     verdict = "LOW"
                     flow_type = "CONTROL_FRAGMENT"
