@@ -29,7 +29,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
+from backend.response_policy import decide_response
 from agent.confidence_engine import AgentTrustTracker
 from agent.p2p_mesh import ConsensusVerdict, VotingRequest, VotingResponse, WeightedConsensusAggregator
 
@@ -106,8 +106,10 @@ class CentralizedTelemetryRepository:
         with self._lock:
             total = len(self._events)
             agents = {e["agent_id"] for e in self._events}
-            high_threats = sum(1 for e in self._events if e["threat_score"] >= 0.60)
-            critical_threats = sum(1 for e in self._events if e["threat_score"] >= 0.80)
+            high_threats = sum(
+                1 for e in self._events if e["threat_score"] >= 0.60)
+            critical_threats = sum(
+                1 for e in self._events if e["threat_score"] >= 0.80)
 
             event_types: Dict[str, int] = {}
             for e in self._events:
@@ -137,8 +139,8 @@ class CentralizedVotingCoordinator:
     RESPONSE_ACTIONS = {
         "LOW": "LOG",
         "MEDIUM": "ALERT",
-        "HIGH": "KILL_PROCESS",
-        "CRITICAL": "ISOLATE_HOST",
+        "HIGH": "ALERT",
+        "CRITICAL": "ALERT",
     }
 
     def __init__(
@@ -147,7 +149,8 @@ class CentralizedVotingCoordinator:
         trust_tracker: Optional[AgentTrustTracker] = None,
     ) -> None:
         self.repository = repository
-        self.trust_tracker = trust_tracker or AgentTrustTracker(db_path="aegis_central_trust.db")
+        self.trust_tracker = trust_tracker or AgentTrustTracker(
+            db_path="aegis_central_trust.db")
         self.aggregator = WeightedConsensusAggregator()
 
         self._verdicts_history: List[Dict[str, Any]] = []
@@ -165,7 +168,8 @@ class CentralizedVotingCoordinator:
         )
         now = time.time()
 
-        peer_observations: Dict[str, Tuple[bool, float]] = {}  # agent_id -> (correlated, max_score)
+        # agent_id -> (correlated, max_score)
+        peer_observations: Dict[str, Tuple[bool, float]] = {}
 
         for event in recent_telemetry:
             peer_id = event["agent_id"]
@@ -182,24 +186,32 @@ class CentralizedVotingCoordinator:
             is_corr = False
             # Correlation checks:
             if req.event_type == "network":
-                local_port = local_details.get("port") or local_details.get("destination_port")
-                req_port = req_details.get("port") or req_details.get("destination_port")
-                local_ip = local_details.get("dest_ip") or local_details.get("ip")
+                local_port = local_details.get(
+                    "port") or local_details.get("destination_port")
+                req_port = req_details.get(
+                    "port") or req_details.get("destination_port")
+                local_ip = local_details.get(
+                    "dest_ip") or local_details.get("ip")
                 req_ip = req_details.get("dest_ip") or req_details.get("ip")
                 if (local_port and local_port == req_port) or (local_ip and local_ip == req_ip):
                     is_corr = True
             elif req.event_type in ("process_linux", "process_windows"):
-                local_proc = str(local_details.get("process") or local_details.get("process_name") or "").lower().strip()
-                req_proc = str(req_details.get("process") or req_details.get("process_name") or "").lower().strip()
+                local_proc = str(local_details.get("process") or local_details.get(
+                    "process_name") or "").lower().strip()
+                req_proc = str(req_details.get("process") or req_details.get(
+                    "process_name") or "").lower().strip()
                 if local_proc and local_proc == req_proc:
                     is_corr = True
             elif req.event_type in ("file", "log_line"):
-                local_file = str(local_details.get("filename") or local_details.get("file_path") or "").lower().strip()
-                req_file = str(req_details.get("filename") or req_details.get("file_path") or "").lower().strip()
+                local_file = str(local_details.get("filename") or local_details.get(
+                    "file_path") or "").lower().strip()
+                req_file = str(req_details.get("filename") or req_details.get(
+                    "file_path") or "").lower().strip()
                 if local_file and (local_file == req_file or local_file.endswith(req_file) or req_file.endswith(local_file)):
                     is_corr = True
 
-            current_corr, current_score = peer_observations.get(peer_id, (False, 0.0))
+            current_corr, current_score = peer_observations.get(
+                peer_id, (False, 0.0))
             new_corr = current_corr or is_corr
             new_score = max(current_score, event["threat_score"])
             peer_observations[peer_id] = (new_corr, new_score)
@@ -226,8 +238,9 @@ class CentralizedVotingCoordinator:
             if v_id and any(v.get("vote_id") == v_id for v in self._verdicts_history):
                 return
             # Ensure response action is populated
-            if "response_action" not in verdict_dict:
-                verdict_dict["response_action"] = self.RESPONSE_ACTIONS.get(verdict_dict.get("severity", "LOW"), "LOG")
+            decision = decide_response(verdict_dict)
+            verdict_dict["response_action"] = decision["action"]
+            verdict_dict["response_policy_reason"] = decision["reason"]
             self._verdicts_history.append(verdict_dict)
             if len(self._verdicts_history) > 1000:
                 self._verdicts_history.pop(0)
@@ -252,7 +265,8 @@ class CentralizedVotingCoordinator:
         with self._lock:
             for existing in self._verdicts_history:
                 if existing.get("vote_id") == target_vote_id:
-                    logger.info("[CommandNode] Returning existing consensus verdict for vote_id=%s", target_vote_id)
+                    logger.info(
+                        "[CommandNode] Returning existing consensus verdict for vote_id=%s", target_vote_id)
                     return existing
 
         req = VotingRequest(
@@ -282,15 +296,16 @@ class CentralizedVotingCoordinator:
             a for a in (self.trust_tracker.get_all_agents() if hasattr(self.trust_tracker, "get_all_agents") else [])
             if a != origin_agent_id
         ]
-        expected_peers = max(len(peer_responses), len(registered_peers)) if registered_peers else len(peer_responses)
+        expected_peers = max(len(peer_responses), len(
+            registered_peers)) if registered_peers else len(peer_responses)
 
         verdict: ConsensusVerdict = self.aggregator.aggregate(
             req, peer_responses, origin_trust=origin_trust, expected_peers=expected_peers
         )
 
-        # 4. Map severity to automated response action
-        # For critical emergencies without quorum, still enforce containment
-        response_action = self.RESPONSE_ACTIONS.get(verdict.severity, "LOG")
+        # 4. Default to a non-destructive action.
+# The response policy decides whether any stronger action is authorized.
+        response_action = "ALERT"
 
         result = {
             "vote_id": verdict.vote_id,
@@ -310,6 +325,10 @@ class CentralizedVotingCoordinator:
             "quorum_needed": getattr(verdict, "quorum_needed", 1),
             "details": details,
         }
+
+        decision = decide_response(result)
+        result["response_action"] = decision["action"]
+        result["response_policy_reason"] = decision["reason"]
 
         with self._lock:
             self._verdicts_history.append(result)

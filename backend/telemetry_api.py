@@ -3,7 +3,7 @@ import os
 import time
 import logging
 from typing import Annotated, Any, Dict, List, Optional, Union
-
+from backend.response_policy import decide_response
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, UploadFile, File, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -60,7 +60,8 @@ from backend.db.repository import (
 from agent.confidence_engine import AgentTrustTracker
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s")
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s")
 
 SERVER_START_TIME = time.time()
 
@@ -78,6 +79,8 @@ local_trust_tracker = AgentTrustTracker(db_path="aegis_central_trust.db")
 # ============================================================
 # HEARTBEAT / SILENT-ALARM SUBSYSTEM
 # ============================================================
+
+
 def _on_silent_alarm(alarm_payload: dict):
     """
     Called from SilenceDetector's background thread when an agent goes silent.
@@ -87,7 +90,8 @@ def _on_silent_alarm(alarm_payload: dict):
     publish_event({**alarm_payload, "type": "agent_alarm"})
     # Persist to DB — schedule on the event loop
     if api_loop is not None:
-        asyncio.run_coroutine_threadsafe(_persist_alarm_bg(alarm_payload), api_loop)
+        asyncio.run_coroutine_threadsafe(
+            _persist_alarm_bg(alarm_payload), api_loop)
 
 
 async def _persist_alarm_bg(alarm_payload: dict) -> None:
@@ -95,7 +99,8 @@ async def _persist_alarm_bg(alarm_payload: dict) -> None:
     try:
         async with get_session() as session:
             await persist_silence_alarm(session, alarm_payload)
-            logger.info("[AEGIS DB] Silence alarm persisted for agent=%s", alarm_payload.get("agent_id"))
+            logger.info("[AEGIS DB] Silence alarm persisted for agent=%s",
+                        alarm_payload.get("agent_id"))
     except Exception as exc:
         logger.warning("[AEGIS DB] Failed to persist silence alarm: %s", exc)
 
@@ -140,9 +145,11 @@ async def lifespan(app: FastAPI):
                 with maintenance_portal._lock:
                     maintenance_portal._windows[w.window_id] = win_obj
             if active_windows:
-                logger.info("[AEGIS API] Restored %d active maintenance window(s) from DB", len(active_windows))
+                logger.info("[AEGIS API] Restored %d active maintenance window(s) from DB", len(
+                    active_windows))
     except Exception as exc:
-        logger.warning("[AEGIS API] Could not restore maintenance windows: %s", exc)
+        logger.warning(
+            "[AEGIS API] Could not restore maintenance windows: %s", exc)
 
     # 3. Start silence detector
     silence_detector.start()
@@ -162,7 +169,8 @@ app = FastAPI(
 
 cors_origins_env = os.getenv("AEGIS_CORS_ORIGINS", "")
 if cors_origins_env.strip():
-    allowed_origins = [orig.strip() for orig in cors_origins_env.split(",") if orig.strip()]
+    allowed_origins = [orig.strip()
+                       for orig in cors_origins_env.split(",") if orig.strip()]
 else:
     allowed_origins = [
         "http://localhost:3000",
@@ -203,6 +211,7 @@ def extract_auth_token(
         return x_agent_token.strip()
     return None
 
+
 def verify_admin_role(
     authorization: Optional[str] = Header(None, alias="Authorization"),
     x_aegis_token: Optional[str] = Header(None, alias="X-AEGIS-Token"),
@@ -210,13 +219,17 @@ def verify_admin_role(
     """FastAPI dependency requiring 'admin' capability."""
     token = extract_auth_token(authorization, x_aegis_token)
     if not token:
-        raise HTTPException(status_code=401, detail="Authentication required: missing token for admin access.")
+        raise HTTPException(
+            status_code=401, detail="Authentication required: missing token for admin access.")
     payload = rbac_auth_service.verify_token(token)
     if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired session token.")
+        raise HTTPException(
+            status_code=401, detail="Invalid or expired session token.")
     if payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail=f"Forbidden: '{payload.get('role')}' role lacks admin privileges.")
+        raise HTTPException(
+            status_code=403, detail=f"Forbidden: '{payload.get('role')}' role lacks admin privileges.")
     return payload
+
 
 def verify_operator_role(
     authorization: Optional[str] = Header(None, alias="Authorization"),
@@ -229,11 +242,13 @@ def verify_operator_role(
         return None
     payload = rbac_auth_service.verify_token(token)
     if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired session token.")
+        raise HTTPException(
+            status_code=401, detail="Invalid or expired session token.")
     role_hierarchy = {"admin": 3, "analyst": 2, "auditor": 1}
     user_role = payload.get("role", "auditor")
     if role_hierarchy.get(user_role, 0) < role_hierarchy.get(required_role, 1):
-        raise HTTPException(status_code=403, detail=f"Forbidden: '{user_role}' role lacks permission. Requires '{required_role}'.")
+        raise HTTPException(
+            status_code=403, detail=f"Forbidden: '{user_role}' role lacks permission. Requires '{required_role}'.")
     return payload
 
 
@@ -321,7 +336,8 @@ async def telemetry_socket(websocket: WebSocket):
 
     except WebSocketDisconnect:
         clients.discard(websocket)
-        logger.info("[AEGIS API] Dashboard disconnected (clients=%d)", len(clients))
+        logger.info(
+            "[AEGIS API] Dashboard disconnected (clients=%d)", len(clients))
 
     except Exception as exc:
         clients.discard(websocket)
@@ -450,12 +466,14 @@ async def post_heartbeat(
     if token and not rbac_auth_service.verify_agent_token(payload.agent_id, token):
         user_payload = rbac_auth_service.verify_token(token)
         if not user_payload:
-            raise HTTPException(status_code=403, detail=f"Invalid authentication token for agent '{payload.agent_id}'.")
+            raise HTTPException(
+                status_code=403, detail=f"Invalid authentication token for agent '{payload.agent_id}'.")
 
     # Anti-spoofing clock skew validation (within 5 minutes)
     now = time.time()
     if abs(now - payload.timestamp) > 300:
-        raise HTTPException(status_code=400, detail="Heartbeat timestamp outside allowed clock skew window.")
+        raise HTTPException(
+            status_code=400, detail="Heartbeat timestamp outside allowed clock skew window.")
 
     data = payload.model_dump()
     # Record the observed source address for the Red Team live-agent registry.
@@ -485,7 +503,8 @@ async def post_heartbeat_shutdown(
     if token and not rbac_auth_service.verify_agent_token(payload.agent_id, token):
         user_payload = rbac_auth_service.verify_token(token)
         if not user_payload:
-            raise HTTPException(status_code=403, detail=f"Invalid authentication token for agent '{payload.agent_id}'.")
+            raise HTTPException(
+                status_code=403, detail=f"Invalid authentication token for agent '{payload.agent_id}'.")
 
     agent_id = payload.agent_id
     reason = payload.reason
@@ -503,7 +522,8 @@ async def post_heartbeat_shutdown(
                 details={"reason": reason, "timestamp": time.time()},
             )
     except Exception as exc:
-        logger.warning("[AEGIS DB] Could not log graceful shutdown audit entry: %s", exc)
+        logger.warning(
+            "[AEGIS DB] Could not log graceful shutdown audit entry: %s", exc)
 
     # Broadcast to dashboard
     await broadcast({
@@ -586,11 +606,11 @@ async def post_p2p_consensus(verdict: P2PConsensusPayload):
     """
     verdict_dict = verdict.model_dump()
 
-    # 1. Ensure response_action is populated
-    if not verdict_dict.get("response_action"):
-        verdict_dict["response_action"] = central_coordinator.RESPONSE_ACTIONS.get(
-            verdict_dict.get("severity", "LOW"), "LOG"
-        )
+    # 1. Recalculate response action using the command-node policy.
+    # Never trust response_action supplied by a peer.
+    decision = decide_response(verdict_dict)
+    verdict_dict["response_action"] = decision["action"]
+    verdict_dict["response_policy_reason"] = decision["reason"]
 
     # 2. Record external verdict in CentralizedVotingCoordinator history for deduplication
     central_coordinator.record_external_verdict(verdict_dict)
@@ -620,10 +640,13 @@ async def post_p2p_consensus(verdict: P2PConsensusPayload):
                     agent_id=verdict.origin_agent_id,
                     action_type=response_act,
                     vote_id=verdict.vote_id,
-                    target_pid=int(target_pid) if target_pid is not None else None,
+                    target_pid=int(
+                        target_pid) if target_pid is not None else None,
                     target_file=str(target_file) if target_file else None,
-                    command_node_ip=details.get("command_node_ip", "127.0.0.1"),
-                    parameters={"details": details, "severity": verdict.severity},
+                    command_node_ip=details.get(
+                        "command_node_ip", "127.0.0.1"),
+                    parameters={"details": details,
+                                "severity": verdict.severity},
                 )
                 action_dict = {
                     "action_id": action_row.action_id,
@@ -648,9 +671,11 @@ async def post_p2p_consensus(verdict: P2PConsensusPayload):
                     "action": action_dict,
                 })
         except Exception as exc:
-            logger.warning("[AEGIS DB] Failed to enqueue remote action for P2P consensus: %s", exc)
+            logger.warning(
+                "[AEGIS DB] Failed to enqueue remote action for P2P consensus: %s", exc)
 
-    event = {**verdict_dict, "type": "p2p_consensus", "dispatched_action": action_dict}
+    event = {**verdict_dict, "type": "p2p_consensus",
+             "dispatched_action": action_dict}
     await broadcast(event)
     return {
         "status": "published",
@@ -692,7 +717,8 @@ async def get_voting_latest():
                     },
                 }
     except Exception as exc:
-        logger.warning("[AEGIS DB] Failed to fetch latest verdict from DB: %s", exc)
+        logger.warning(
+            "[AEGIS DB] Failed to fetch latest verdict from DB: %s", exc)
 
     return {"status": "none", "verdict": None}
 
@@ -749,7 +775,8 @@ async def get_centralized_telemetry(
                 "source": "neondb",
             }
     except Exception as exc:
-        logger.warning("[AEGIS DB] Falling back to in-memory telemetry: %s", exc)
+        logger.warning(
+            "[AEGIS DB] Falling back to in-memory telemetry: %s", exc)
         telemetries = central_repo.query_telemetry(
             agent_id=agent_id, event_type=event_type, min_score=min_score, limit=limit
         )
@@ -777,7 +804,8 @@ async def post_centralized_vote(
     if token and not rbac_auth_service.verify_agent_token(origin_agent_id, token):
         user_payload = rbac_auth_service.verify_token(token)
         if not user_payload:
-            raise HTTPException(status_code=403, detail=f"Invalid authentication token for agent '{origin_agent_id}'.")
+            raise HTTPException(
+                status_code=403, detail=f"Invalid authentication token for agent '{origin_agent_id}'.")
 
     event_type = payload.event_type
     threat_score = payload.threat_score
@@ -802,12 +830,21 @@ async def post_centralized_vote(
         async with get_session() as session:
             await persist_consensus_verdict(session, verdict)
     except Exception as exc:
-        logger.warning("[AEGIS DB] Failed to persist centralized verdict: %s", exc)
+        logger.warning(
+            "[AEGIS DB] Failed to persist centralized verdict: %s", exc)
 
+        # Re-evaluate the action before queueing it.
+    # The policy must be the authority, not the incoming action label.
+    policy_input = dict(verdict)
+    policy_input["details"] = details
+    decision = decide_response(policy_input)
+
+    verdict["response_action"] = decision["action"]
+    verdict["response_policy_reason"] = decision["reason"]
     # ── Autonomous Remote Command Dispatcher: Auto-Enqueue Mitigation Actions ──
     action_dict = None
     response_act = verdict.get("response_action")
-    if response_act in ("KILL_PROCESS", "ISOLATE_HOST", "QUARANTINE_FILE", "ALERT"):
+    if response_act in ("KILL_PROCESS", "QUARANTINE_FILE", "ALERT"):
         try:
             async with get_session() as session:
                 target_pid = details.get("pid") or payload.get("pid")
@@ -822,10 +859,13 @@ async def post_centralized_vote(
                     agent_id=origin_agent_id,
                     action_type=response_act,
                     vote_id=verdict.get("vote_id"),
-                    target_pid=int(target_pid) if target_pid is not None else None,
+                    target_pid=int(
+                        target_pid) if target_pid is not None else None,
                     target_file=str(target_file) if target_file else None,
-                    command_node_ip=details.get("command_node_ip", "127.0.0.1"),
-                    parameters={"details": details, "severity": verdict.get("severity")},
+                    command_node_ip=details.get(
+                        "command_node_ip", "127.0.0.1"),
+                    parameters={"details": details,
+                                "severity": verdict.get("severity")},
                 )
                 action_dict = {
                     "action_id": action_row.action_id,
@@ -851,7 +891,8 @@ async def post_centralized_vote(
                     "action": action_dict,
                 })
         except Exception as exc:
-            logger.warning("[AEGIS DB] Failed to enqueue remote action: %s", exc)
+            logger.warning(
+                "[AEGIS DB] Failed to enqueue remote action: %s", exc)
 
     # Broadcast live to dashboards
     await broadcast({
@@ -905,7 +946,8 @@ async def get_centralized_verdicts(
                 "source": "neondb",
             }
     except Exception as exc:
-        logger.warning("[AEGIS DB] Falling back to in-memory verdicts: %s", exc)
+        logger.warning(
+            "[AEGIS DB] Falling back to in-memory verdicts: %s", exc)
         return {
             "verdicts": central_coordinator.get_verdicts(limit=limit),
             "source": "memory",
@@ -931,9 +973,11 @@ async def api_enqueue_action(
     if token:
         user = rbac_auth_service.verify_token(token)
         if not user:
-            raise HTTPException(status_code=401, detail="Invalid authentication token.")
+            raise HTTPException(
+                status_code=401, detail="Invalid authentication token.")
         if user.get("role") not in ("admin", "analyst"):
-            raise HTTPException(status_code=403, detail="Operator privileges required to enqueue actions.")
+            raise HTTPException(
+                status_code=403, detail="Operator privileges required to enqueue actions.")
 
     agent_id = payload.agent_id
     action_type = payload.action_type
@@ -999,7 +1043,8 @@ async def api_get_pending_actions(agent_id: str):
             ]
             return {"agent_id": agent_id, "actions": actions, "count": len(actions)}
     except Exception as exc:
-        logger.error("[Dispatcher] Failed to fetch pending actions for %s: %s", agent_id, exc)
+        logger.error(
+            "[Dispatcher] Failed to fetch pending actions for %s: %s", agent_id, exc)
         return {"agent_id": agent_id, "actions": [], "count": 0, "error": str(exc)}
 
 
@@ -1021,7 +1066,8 @@ async def api_ack_action_execution(
         if not is_agent_valid:
             user = rbac_auth_service.verify_token(token)
             if not user or user.get("role") not in ("admin", "analyst"):
-                raise HTTPException(status_code=403, detail=f"Unauthorized to acknowledge action for agent '{agent_id}'.")
+                raise HTTPException(
+                    status_code=403, detail=f"Unauthorized to acknowledge action for agent '{agent_id}'.")
 
     status = payload.status.upper()
     result_details = payload.get_effective_details()
@@ -1030,12 +1076,14 @@ async def api_ack_action_execution(
         async with get_session() as session:
             from sqlalchemy import select
             from backend.db.models import RemoteAction
-            stmt = select(RemoteAction).where(RemoteAction.action_id == action_id)
+            stmt = select(RemoteAction).where(
+                RemoteAction.action_id == action_id)
             res = await session.execute(stmt)
             existing = res.scalar_one_or_none()
 
             if not existing:
-                raise HTTPException(status_code=404, detail=f"action_id '{action_id}' not found")
+                raise HTTPException(
+                    status_code=404, detail=f"action_id '{action_id}' not found")
 
             # Ownership check: agent_id must match target agent
             if existing.agent_id != agent_id:
@@ -1045,7 +1093,8 @@ async def api_ack_action_execution(
                 )
 
             # Terminal state check: prevent duplicate acks once terminal
-            terminal_states = {"SUCCESS", "FAILED", "PARTIAL", "NOT_FOUND", "DENIED", "SIMULATED", "EXECUTED", "ERROR"}
+            terminal_states = {"SUCCESS", "FAILED", "PARTIAL",
+                               "NOT_FOUND", "DENIED", "SIMULATED", "EXECUTED", "ERROR"}
             if existing.status and existing.status.upper() in terminal_states:
                 raise HTTPException(
                     status_code=409,
@@ -1073,7 +1122,8 @@ async def api_ack_action_execution(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("[Dispatcher] Failed to ack action %s: %s", action_id, exc)
+        logger.error("[Dispatcher] Failed to ack action %s: %s",
+                     action_id, exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -1189,14 +1239,16 @@ async def post_trust_feedback(
     new_trust = None
 
     if not vote_id and not agent_id:
-        raise HTTPException(status_code=400, detail="Either vote_id or agent_id is required.")
+        raise HTTPException(
+            status_code=400, detail="Either vote_id or agent_id is required.")
 
     try:
         async with get_session() as session:
             if vote_id:
                 verdict_row = await record_admin_feedback(session, vote_id, confirmed, confirmed_by)
                 if not verdict_row and not agent_id:
-                    raise HTTPException(status_code=404, detail=f"vote_id '{vote_id}' not found")
+                    raise HTTPException(
+                        status_code=404, detail=f"vote_id '{vote_id}' not found")
                 if verdict_row and not agent_id:
                     agent_id = verdict_row.origin_agent_id
 
@@ -1204,13 +1256,16 @@ async def post_trust_feedback(
                 old_trust_row = await get_agent_trust(session, agent_id)
                 old_trust = old_trust_row.trust_score if old_trust_row else 0.5
                 if payload.adjustment is not None:
-                    new_trust = max(0.0, min(1.0, old_trust + payload.adjustment))
+                    new_trust = max(
+                        0.0, min(1.0, old_trust + payload.adjustment))
                 else:
                     alpha = 0.2
-                    new_trust = alpha * (1.0 if confirmed else 0.0) + (1 - alpha) * old_trust
+                    new_trust = alpha * \
+                        (1.0 if confirmed else 0.0) + (1 - alpha) * old_trust
 
                 await upsert_agent_trust(session, agent_id, new_trust, confirmed)
-                local_trust_tracker.record_outcome(agent_id, was_correct=confirmed)
+                local_trust_tracker.record_outcome(
+                    agent_id, was_correct=confirmed)
 
                 logger.info(
                     "[Trust] Feedback: vote_id=%s agent=%s confirmed=%s → trust %.3f",
@@ -1290,8 +1345,6 @@ async def acknowledge_alert(alarm_id: str, payload: dict = {}):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-
-
 # ============================================================
 # MAINTENANCE WINDOW PORTAL ENDPOINTS  (NOW DB-BACKED)
 # ============================================================
@@ -1325,7 +1378,8 @@ async def schedule_maintenance_window(
         async with get_session() as session:
             await persist_maintenance_window(session, win.to_dict())
     except Exception as exc:
-        logger.warning("[AEGIS DB] Failed to persist maintenance window: %s", exc)
+        logger.warning(
+            "[AEGIS DB] Failed to persist maintenance window: %s", exc)
 
     return {"status": "scheduled", "window": win.to_dict()}
 
@@ -1356,7 +1410,8 @@ async def cancel_maintenance_window(
         async with get_session() as session:
             await cancel_maintenance_window_db(session, wid)
     except Exception as exc:
-        logger.warning("[AEGIS DB] Failed to cancel maintenance window in DB: %s", exc)
+        logger.warning(
+            "[AEGIS DB] Failed to cancel maintenance window in DB: %s", exc)
 
     return {"status": "cancelled" if success else "not_found", "window_id": wid}
 
@@ -1423,9 +1478,10 @@ async def get_report_preview():
             verdicts = await get_verdicts_history(session, limit=20)
             actions = await get_audit_log(session, limit=20)
             agents = await get_all_agent_trust(session)
-            
-            critical_count = sum(1 for v in verdicts if getattr(v, "final_weighted_score", 0.0) >= 0.8) + len(alarms)
-            
+
+            critical_count = sum(1 for v in verdicts if getattr(
+                v, "final_weighted_score", 0.0) >= 0.8) + len(alarms)
+
             return {
                 "generated_at": time.time(),
                 "metrics": {
@@ -1460,7 +1516,7 @@ async def get_report_preview():
 async def export_executive_report_pdf():
     """Generates and downloads a publication-grade Executive Security Posture PDF Report."""
     from backend.reports.report_generator import build_executive_pdf
-    
+
     try:
         async with get_session() as session:
             alarms = await get_active_silence_alarms(session)
@@ -1468,13 +1524,15 @@ async def export_executive_report_pdf():
             actions = await get_audit_log(session, limit=10)
             agents = await get_all_agent_trust(session)
 
-            critical_count = sum(1 for v in verdicts if getattr(v, "final_weighted_score", 0.0) >= 0.8) + len(alarms)
+            critical_count = sum(1 for v in verdicts if getattr(
+                v, "final_weighted_score", 0.0) >= 0.8) + len(alarms)
 
             incidents = []
             for v in verdicts:
                 score = getattr(v, "final_weighted_score", 0.0)
                 ts = getattr(v, "verdict_timestamp", time.time())
-                sev = "CRITICAL" if score >= 0.8 else ("HIGH" if score >= 0.5 else "MEDIUM")
+                sev = "CRITICAL" if score >= 0.8 else (
+                    "HIGH" if score >= 0.5 else "MEDIUM")
                 incidents.append({
                     "time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts if ts < 1e11 else ts / 1000)),
                     "agent": getattr(v, "origin_agent_id", "endpoint"),
@@ -1495,7 +1553,8 @@ async def export_executive_report_pdf():
                 "incidents": incidents[:6] if incidents else None,
             }
     except Exception as exc:
-        logger.warning("Falling back to standard executive report payload: %s", exc)
+        logger.warning(
+            "Falling back to standard executive report payload: %s", exc)
         report_data = {
             "title": "AEGIS Executive Cyber Threat & Posture Report",
             "generated_at": time.time(),
@@ -1511,7 +1570,8 @@ async def export_executive_report_pdf():
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=AEGIS_Executive_Security_Report.pdf"},
+        headers={
+            "Content-Disposition": "attachment; filename=AEGIS_Executive_Security_Report.pdf"},
     )
 
 
@@ -1519,7 +1579,7 @@ async def export_executive_report_pdf():
 async def export_incident_report_pdf(incident_id: str = "INC-CURRENT-001"):
     """Generates and downloads a detailed Incident Forensics Report PDF."""
     from backend.reports.report_generator import build_incident_pdf
-    
+
     report_data = {
         "title": f"AEGIS Incident Forensics Report — {incident_id}",
         "generated_at": time.time(),
@@ -1534,7 +1594,8 @@ async def export_incident_report_pdf(incident_id: str = "INC-CURRENT-001"):
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=AEGIS_Incident_{incident_id}_Report.pdf"},
+        headers={
+            "Content-Disposition": f"attachment; filename=AEGIS_Incident_{incident_id}_Report.pdf"},
     )
 
 
@@ -1577,6 +1638,7 @@ async def launch_simulation_scenario(payload: dict):
     """
     from backend.services.simulation_service import start_simulation
     scenario = payload.get("scenario", "linux")
+
     allowed_scenarios = {"linux", "file", "windows", "pcap_portscan", "pcap_ddos", "pcap_hydra", "sabotage", "consensus", "all"}
     if scenario not in allowed_scenarios:
         raise HTTPException(status_code=400, detail=f"Unsupported scenario: {scenario}")
@@ -1596,6 +1658,36 @@ async def launch_simulation_scenario(payload: dict):
     # Use the IP observed by the heartbeat endpoint; ignore browser-supplied target_ip.
     target_ip = meta["ip"]
     res = start_simulation(scenario=scenario, target_id=target_id, target_ip=target_ip, custom_config=custom_config)
+
+    allowed_scenarios = {"linux", "file", "windows", "pcap_portscan",
+                         "pcap_ddos", "pcap_hydra", "sabotage", "graceful", "consensus", "all"}
+    if scenario not in allowed_scenarios:
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported scenario: {scenario}")
+    target_id = payload.get("target_id", "node1-linux")
+    target_ip = payload.get("target_ip", "10.0.0.10")
+    custom_config = payload.get("custom_config", {})
+    if not target_id:
+        raise HTTPException(
+            status_code=400, detail="Select a registered AEGIS agent or target node first.")
+
+    # Check if target_id is a registered live agent
+    live = {row.get("agent_id"): row for row in silence_detector.list_agents()}
+    if target_id in live:
+        row = live[target_id]
+        meta = agent_connection_metadata.get(target_id, {})
+        now = time.time()
+        age = float(row.get("silence_duration", now -
+                    float(row.get("last_seen", 0))))
+        if age > silence_detector.silence_threshold or str(row.get("status", "")).upper() in {"OFFLINE_GRACEFUL", "OFFLINE", "DISCONNECTED"}:
+            raise HTTPException(
+                status_code=409, detail="Target agent is offline or its heartbeat is stale.")
+        if meta.get("ip"):
+            target_ip = meta["ip"]
+
+    res = start_simulation(scenario=scenario, target_id=target_id,
+                           target_ip=target_ip, custom_config=custom_config)
+
     return res
 
 
@@ -1614,6 +1706,77 @@ async def reset_simulation_endpoint():
     from backend.services.simulation_service import reset_simulation_state
     reset_simulation_state()
     return {"status": "reset", "message": "Simulation status reset successfully."}
+
+
+@app.post("/api/attack/probe")
+async def probe_attack_target_endpoint(payload: dict):
+    """Actively probes target IP address and ports."""
+    from backend.services.simulation_service import probe_target
+    ip = payload.get("ip", "127.0.0.1")
+    port = payload.get("port")
+    return probe_target(ip=ip, port=port)
+
+
+@app.post("/api/attack/command")
+async def run_attack_c2_command_endpoint(payload: dict):
+    """Executes interactive Red Team C2 CLI command from the attack dashboard terminal."""
+    from backend.services.simulation_service import execute_terminal_command
+    command = payload.get("command", "")
+    return execute_terminal_command(command)
+
+
+@app.get("/api/attack/export")
+async def export_attack_campaign_report_endpoint():
+    """Exports structured Red Team penetration testing and campaign engagement audit report."""
+    from backend.services.simulation_service import export_campaign_report
+    return export_campaign_report()
+
+
+@app.get("/api/attack/payloads")
+async def list_attack_payload_templates_endpoint():
+    """Returns catalog of configurable adversary payloads and shellcode templates."""
+    return [
+        {
+            "id": "meterpreter_linux_x64",
+            "name": "Java / Linux x64 Meterpreter Reverse TCP",
+            "category": "Command & Control / Reverse Shell",
+            "default_port": 4444,
+            "architecture": "x86_64",
+            "description": "Stages multi-thread reflective ELF payload in memory with ptrace anti-debug evasion.",
+        },
+        {
+            "id": "ransomware_pe_dropper",
+            "name": "Windows High-Entropy PE Dropper & Shadow Purge",
+            "category": "Impact / Malware",
+            "default_port": 445,
+            "architecture": "PE32+",
+            "description": "Executes vssadmin shadow wipe, injects into svchost, and executes ChaCha20 encryption loops.",
+        },
+        {
+            "id": "syn_flood_dos",
+            "name": "TCP SYN Flood State Exhaustion Blast",
+            "category": "Network Denial of Service",
+            "default_port": 80,
+            "architecture": "Raw Socket",
+            "description": "Fires 200+ raw SYN frames/sec with spoofed source addresses to exhaust connection tables.",
+        },
+        {
+            "id": "hydra_ssh_brute",
+            "name": "Hydra Multi-Threaded OpenSSH Password Spray",
+            "category": "Credential Access",
+            "default_port": 22,
+            "architecture": "Protocol Handshake",
+            "description": "Executes 12 concurrent authentication threads with dictionary password guessing.",
+        },
+        {
+            "id": "heartbeat_sabotage",
+            "name": "Agent Process Sabotage & Telemetry Drop",
+            "category": "Defense Evasion",
+            "default_port": 8000,
+            "architecture": "Process Signal",
+            "description": "Issues SIGKILL to monitoring daemons to evaluate victim 15s Silence-as-Alarm detection logic.",
+        },
+    ]
 
 
 # ============================================================
@@ -1650,15 +1813,16 @@ async def get_latest_benchmark_results():
     """Returns the latest performance benchmark results (latencies, MTTD, MTTR)."""
     import json
     from pathlib import Path
-    
-    json_path = Path(__file__).resolve().parent.parent / "experiments" / "benchmarks" / "benchmark_results.json"
+
+    json_path = Path(__file__).resolve().parent.parent / \
+        "experiments" / "benchmarks" / "benchmark_results.json"
     if json_path.exists():
         try:
             with open(json_path, "r") as f:
                 return json.load(f)
         except Exception as exc:
             logger.warning("Error reading benchmark_results.json: %s", exc)
-    
+
     # Fallback / Run fresh if not cached
     from experiments.benchmarks.benchmark_suite import run_full_benchmark
     return run_full_benchmark()
@@ -1757,8 +1921,10 @@ async def set_alert_config_endpoint(payload: dict):
     config = payload.get("config", {})
     enabled = payload.get("enabled", True)
     if not name or not dest_type:
-        raise HTTPException(status_code=400, detail="Missing name or type in alert config.")
-    default_alert_dispatcher.configure_destination(name, dest_type, config, enabled=enabled)
+        raise HTTPException(
+            status_code=400, detail="Missing name or type in alert config.")
+    default_alert_dispatcher.configure_destination(
+        name, dest_type, config, enabled=enabled)
     if "min_severity" in payload:
         default_alert_dispatcher.min_severity = payload["min_severity"]
     return {"status": "configured", "destination": name}
@@ -1778,7 +1944,8 @@ async def dispatch_test_alert_endpoint(payload: dict = None):
         origin_agent_id=payload.get("origin_agent_id", "vm1-linux"),
         target_ip=payload.get("target_ip", "172.30.0.21"),
         source_ip=payload.get("source_ip", "10.0.0.99"),
-        details=payload.get("details", {"process": "vssadmin.exe", "action": "delete shadows /all"}),
+        details=payload.get(
+            "details", {"process": "vssadmin.exe", "action": "delete shadows /all"}),
         mitre_tactics=["Impact (TA0040)", "Inhibit System Recovery (T1490)"],
         mitigation_action="KILL_PROCESS_AND_ISOLATE",
         consensus_peers=3,
@@ -1811,7 +1978,8 @@ async def start_battle_campaign_endpoint(payload: dict = None):
         async_run=True,
     )
     if not success:
-        raise HTTPException(status_code=409, detail="A battle campaign is already actively running.")
+        raise HTTPException(
+            status_code=409, detail="A battle campaign is already actively running.")
     return {"status": "started", "target": target, "target_ip": target_ip}
 
 
@@ -1855,7 +2023,8 @@ async def push_fleet_config_endpoint(payload: dict):
     agent_id = payload.get("agent_id", "agent-local")
     config_patch = payload.get("config", {})
     if not config_patch:
-        raise HTTPException(status_code=400, detail="Missing 'config' dictionary in payload.")
+        raise HTTPException(
+            status_code=400, detail="Missing 'config' dictionary in payload.")
     res = fleet_update_service.push_agent_config(agent_id, config_patch)
     return res
 
@@ -1883,7 +2052,8 @@ async def verify_fleet_package_endpoint(payload: dict):
     public_key_b64 = payload.get("public_key_b64")
 
     if not pkg_path or not sig_b64:
-        raise HTTPException(status_code=400, detail="Missing package_path or signature_b64.")
+        raise HTTPException(
+            status_code=400, detail="Missing package_path or signature_b64.")
 
     res = fleet_update_service.verify_package(
         package_path=pkg_path,
@@ -1940,7 +2110,8 @@ async def export_compliance_report_pdf_endpoint(payload: dict = None):
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=AEGIS_ISO27001_NIST_Compliance_Report.pdf"},
+        headers={
+            "Content-Disposition": "attachment; filename=AEGIS_ISO27001_NIST_Compliance_Report.pdf"},
     )
 
 
@@ -1995,9 +2166,11 @@ async def scan_yara_payload_endpoint(payload: dict):
             matches = default_yara_scanner.scan_buffer(buf)
             return {"scanned": True, "is_malicious": len(matches) > 0, "matches": matches}
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid base64 data: {exc}")
+            raise HTTPException(
+                status_code=400, detail=f"Invalid base64 data: {exc}")
     else:
-        raise HTTPException(status_code=400, detail="Must provide 'file_path', 'text', or 'base64_data'.")
+        raise HTTPException(
+            status_code=400, detail="Must provide 'file_path', 'text', or 'base64_data'.")
 
 
 @app.post("/api/rules/sigma/compile")
@@ -2011,7 +2184,8 @@ async def compile_sigma_rule_endpoint(payload: dict):
     elif rule_dict:
         rule = default_sigma_translator.compile_rule(rule_dict)
     else:
-        raise HTTPException(status_code=400, detail="Must provide 'yaml' string or 'rule' dictionary.")
+        raise HTTPException(
+            status_code=400, detail="Must provide 'yaml' string or 'rule' dictionary.")
     return {
         "status": "compiled",
         "rule_id": rule.id,
@@ -2030,8 +2204,10 @@ async def compile_yara_rule_endpoint(payload: dict):
     condition = payload.get("condition", "any of them")
     meta = payload.get("meta", {})
     if not name or not strings_dict:
-        raise HTTPException(status_code=400, detail="Must provide 'name' and 'strings_dict'.")
-    rule = default_yara_scanner.add_rule(name=name, strings_dict=strings_dict, condition=condition, meta=meta)
+        raise HTTPException(
+            status_code=400, detail="Must provide 'name' and 'strings_dict'.")
+    rule = default_yara_scanner.add_rule(
+        name=name, strings_dict=strings_dict, condition=condition, meta=meta)
     return {
         "status": "compiled",
         "rule_name": rule.name,
@@ -2053,7 +2229,8 @@ async def run_collector_stress_test_endpoint(payload: dict = None):
     duration = float(payload.get("duration", 1.0))
     threads = int(payload.get("threads", 4))
 
-    tester = SyntheticCollectorStressTest(target_rate=target_rate, duration_seconds=duration, num_threads=threads)
+    tester = SyntheticCollectorStressTest(
+        target_rate=target_rate, duration_seconds=duration, num_threads=threads)
     results = tester.run()
     return results
 
@@ -2064,13 +2241,15 @@ async def get_collector_flamegraph_endpoint():
     from experiments.benchmarks.collector_profiler import CollectorHardwareProfiler
     profiler = CollectorHardwareProfiler()
     summary = profiler.run_full_benchmark()
-    svg_path = summary.get("flamegraph_path", "experiments/benchmarks/flamegraph_comparison.svg")
+    svg_path = summary.get(
+        "flamegraph_path", "experiments/benchmarks/flamegraph_comparison.svg")
     try:
         with open(svg_path, "r", encoding="utf-8") as f:
             svg_data = f.read()
         return Response(content=svg_data, media_type="image/svg+xml")
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to read flamegraph SVG: {exc}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to read flamegraph SVG: {exc}")
 
 
 # ============================================================
@@ -2131,7 +2310,8 @@ async def user_login_endpoint(credentials: dict):
     password = credentials.get("password", "")
     auth_result = rbac_auth_service.authenticate_user(username, password)
     if not auth_result:
-        raise HTTPException(status_code=401, detail="Invalid username or password.")
+        raise HTTPException(
+            status_code=401, detail="Invalid username or password.")
     return auth_result
 
 
@@ -2140,11 +2320,13 @@ async def get_current_user_endpoint(authorization: str = Header(None)):
     """Verifies bearer token and returns current user identity."""
     from backend.services.rbac_auth_service import rbac_auth_service
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header.")
+        raise HTTPException(
+            status_code=401, detail="Missing or invalid Authorization header.")
     token = authorization.split("Bearer ")[1]
     payload = rbac_auth_service.verify_token(token)
     if not payload:
-        raise HTTPException(status_code=401, detail="Session expired or invalid token.")
+        raise HTTPException(
+            status_code=401, detail="Session expired or invalid token.")
     return {"authenticated": True, "user": payload}
 
 
@@ -2156,7 +2338,8 @@ async def issue_agent_token_endpoint(payload: dict, authorization: str = Header(
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split("Bearer ")[1]
         if not rbac_auth_service.authorize_role(token, "admin"):
-            raise HTTPException(status_code=403, detail="Admin capability required to issue agent tokens.")
+            raise HTTPException(
+                status_code=403, detail="Admin capability required to issue agent tokens.")
 
     agent_id = payload.get("agent_id")
     if not agent_id:
@@ -2170,10 +2353,14 @@ if __name__ == "__main__":
     import sys
     import uvicorn
 
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    project_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), ".."))
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
-    os.environ["PYTHONPATH"] = project_root + (os.pathsep + os.environ["PYTHONPATH"] if "PYTHONPATH" in os.environ else "")
+    os.environ["PYTHONPATH"] = project_root + \
+        (os.pathsep + os.environ["PYTHONPATH"]
+         if "PYTHONPATH" in os.environ else "")
 
     # 0.0.0.0 — agent machines on the LAN need to reach this
-    uvicorn.run("backend.telemetry_api:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("backend.telemetry_api:app",
+                host="0.0.0.0", port=8000, reload=True)

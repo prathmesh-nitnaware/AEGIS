@@ -140,6 +140,25 @@ engine = ThreatFusionEngine()
 print("[run_all] ThreatFusionEngine initialised. Check the [loader] lines above")
 print("[run_all] for 'Loaded X' vs 'Missing artefact' / 'Failed to load' per model.\n")
 
+# Start the response-action polling worker in simulation mode by default.
+try:
+    from response_worker import main as response_worker_main
+
+
+    os.environ["COMMAND_NODE_URL"] = COMMAND_NODE_URL
+    os.environ["AEGIS_AGENT_ID"] = getattr(
+        args, "agent_id", "agent-host-local"
+    )
+
+    response_thread = threading.Thread(
+        target=response_worker_main,
+        name="aegis-response-worker",
+        daemon=True,
+    )
+    response_thread.start()
+    print("[run_all] Response worker started (simulation unless explicitly configured).")
+except Exception as exc:
+    print(f"[run_all] Response worker failed to start: {exc}")
 # ---------------------------------------------------------------------------
 # JSONL output -- every scored event (from every model) is appended here,
 # one JSON object per line, in addition to being printed to the console.
