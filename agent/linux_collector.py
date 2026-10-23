@@ -153,7 +153,7 @@ class LinuxTelemetryCollector:
             print()
 
             # Dispatch live telemetry event to backend API
-            agent_id = os.environ.get("AGENT_ID") or socket.gethostname() if "socket" in globals() else os.environ.get("AGENT_ID", "linux-agent")
+            agent_id = os.environ.get("AGENT_ID") or socket.gethostname()
             event = {
                 "timestamp": timestamp,
                 "agent_id": agent_id,
