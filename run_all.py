@@ -324,17 +324,62 @@ def update_agent_telemetry_files(server_ip: str) -> list[str]:
     return updated_files
 
 
+def prompt_node_role() -> str:
+    """Prompt the user whether to run as Main Server or Endpoint Agent on this machine."""
+    if not sys.stdin.isatty():
+        return "server"
+    print("\n" + "-" * 80)
+    print("  🖥️  AEGIS PLATFORM ROLE SELECTION")
+    print("-" * 80)
+    print("  [1] Main Server Node    -> Runs FastAPI Backend (:8000) & SOC Dashboards (:5173/:5174)")
+    print("  [2] Endpoint Agent Node -> Runs on client/VM machine, streams telemetry to Main Server")
+    print("-" * 80)
+    try:
+        choice = input("[?] Select Role for this machine [Press ENTER for 1 (Server), or 2 (Agent)]: ").strip()
+        if choice in ("2", "agent", "Agent"):
+            return "agent"
+        return "server"
+    except (EOFError, KeyboardInterrupt):
+        return "server"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="AEGIS Unified Native Platform Launcher")
     parser.add_argument("--ip", "--server-ip", dest="server_ip", default=None, help="Main server IP address")
+    parser.add_argument("--agent", action="store_true", help="Launch this device as an Endpoint Agent Node")
+    parser.add_argument("--server", action="store_true", help="Launch this device as the Main Server Node")
     parser.add_argument("--update-only", action="store_true", help="Only update agent configuration files and exit")
     args, _ = parser.parse_known_args()
+
+    py_exe = get_python_exe()
 
     print("=" * 80)
     print("      AEGIS AUTONOMOUS SWARM DEFENSE — UNIFIED PLATFORM LAUNCHER")
     print("=" * 80)
 
-    # 1. Detect & Prompt for Main Server IP
+    # Determine node role
+    if args.agent:
+        role = "agent"
+    elif args.server:
+        role = "server"
+    else:
+        role = prompt_node_role()
+
+    if role == "agent":
+        print("\n" + "=" * 80)
+        print("  🛰️  STARTING AEGIS ENDPOINT AGENT NODE")
+        print("=" * 80)
+        agent_script = ROOT_DIR / "agent" / "run_all.py"
+        agent_cmd = [py_exe, str(agent_script)]
+        if args.server_ip:
+            agent_cmd.extend(["--command-node", f"http://{args.server_ip}:8000"])
+        try:
+            subprocess.run(agent_cmd, cwd=str(ROOT_DIR / "agent"))
+        except KeyboardInterrupt:
+            pass
+        return
+
+    # 1. Detect & Prompt for Main Server IP (when running in Server mode)
     detected_ip = detect_lan_ip()
     server_ip = prompt_server_ip(detected_ip, cli_ip=args.server_ip)
 
@@ -359,7 +404,6 @@ def main() -> None:
     print(f"  📡 Agent Telemetry Ingestion Endpoint   -> {command_url}/api/telemetry")
     print("=" * 80)
 
-    py_exe = get_python_exe()
     npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
 
     processes: list[subprocess.Popen] = []

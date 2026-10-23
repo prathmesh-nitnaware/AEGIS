@@ -123,19 +123,124 @@ parser.add_argument(
     help="Comma-separated list of peer addresses for P2P mesh (e.g. 192.168.0.105:9001).",
 )
 parser.add_argument(
-    "--agent-id", dest="agent_id", default="agent-host-local",
-    help="Agent ID identifier for peer voting and telemetry (default: agent-host-local).",
+    "--agent-id", dest="agent_id", default=os.environ.get("AGENT_ID", socket.gethostname()),
+    help="Agent ID identifier for peer voting, heartbeats, and telemetry (default: hostname).",
+)
+parser.add_argument(
+    "--no-heartbeat", dest="no_heartbeat", action="store_true", default=False,
+    help="Disable automatic background heartbeat pulse emitter.",
 )
 parser.add_argument(
     "--command-node", "--server", dest="command_node_url", default=None,
     help="URL of central command node (default: COMMAND_NODE_URL or http://172.16.244.124:8000).",
 )
+parser.add_argument(
+    "--no-ip-prompt", dest="no_ip_prompt", action="store_true", default=False,
+    help="Skip interactive Main Server IP prompt and use default/environment immediately.",
+)
 args, _ = parser.parse_known_args()
 
-COMMAND_NODE_URL = (
+
+def clean_server_url(raw_input: str) -> str:
+    """Normalize user input to a fully qualified http://<ip>:<port> URL."""
+    val = raw_input.strip()
+    if not val:
+        return "http://127.0.0.1:8000"
+    if not val.startswith("http://") and not val.startswith("https://"):
+        val = f"http://{val}"
+    parsed = urllib.parse.urlsplit(val)
+    port = parsed.port or 8000
+    host = parsed.hostname or "127.0.0.1"
+    return f"{parsed.scheme}://{host}:{port}"
+
+
+def prompt_server_url(default_url: str) -> str:
+    """Prompt the user for the Main Server IP address when starting the agent."""
+    parsed = urllib.parse.urlsplit(default_url)
+    default_host = parsed.hostname or "127.0.0.1"
+
+    print("\n" + "=" * 80)
+    print("      AEGIS ENDPOINT AGENT — OS-AWARE TELEMETRY & THREAT DEFENSE")
+    print("=" * 80)
+    print(f"  Target Main Server:  {default_url}")
+    print("  This agent will stream live ML telemetry, verdicts, and heartbeats to this server.")
+    print("-" * 80)
+
+    if not sys.stdin.isatty():
+        return default_url
+
+    try:
+        raw = input(f"[?] Enter Main Server IP address [Press ENTER for {default_host}]: ").strip()
+        if not raw:
+            print(f"[+] Using Main Server: {default_url}")
+            return default_url
+        cleaned = clean_server_url(raw)
+        print(f"[+] Configured Main Server URL: {cleaned}")
+        return cleaned
+    except (EOFError, KeyboardInterrupt):
+        return default_url
+
+
+def test_server_connectivity(server_url: str) -> bool:
+    """Test reachability to the central Command Node API health endpoint."""
+    print(f"[*] Verifying connectivity to Main Server at {server_url}/api/health ...")
+    try:
+        req = urllib.request.Request(f"{server_url}/api/health", headers={"User-Agent": "AEGIS-Agent"})
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            if resp.status == 200:
+                print(f"  [OK] Successfully connected to Main Server at {server_url} (HTTP 200)!\n")
+                return True
+    except Exception as exc:
+        print(f"  [!] Note: Cannot immediately connect to {server_url}/api/health ({exc}).")
+        print("      Telemetry and heartbeats will start and retry connecting in the background.\n")
+    return False
+
+
+def save_agent_server_url(server_url: str) -> None:
+    """Persist configured server URL into local agent.conf and config.py defaults."""
+    try:
+        conf_file = _HERE / "agent.conf"
+        data = {}
+        if conf_file.exists():
+            try:
+                data = json.loads(conf_file.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        data["command_node_url"] = server_url
+        conf_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    try:
+        cfg_file = _HERE / "config.py"
+        if cfg_file.exists():
+            content = cfg_file.read_text(encoding="utf-8")
+            import re
+            new_content = re.sub(
+                r'command_node_url:\s*str\s*=\s*field\(default_factory=lambda:\s*os\.environ\.get\("COMMAND_NODE_URL",\s*"http://[^"]+?"\)\)',
+                f'command_node_url: str = field(default_factory=lambda: os.environ.get("COMMAND_NODE_URL", "{server_url}"))',
+                content,
+            )
+            if new_content != content:
+                cfg_file.write_text(new_content, encoding="utf-8")
+    except Exception:
+        pass
+
+
+default_target = (
     args.command_node_url
-    or os.environ.get("COMMAND_NODE_URL", "http://172.16.244.124:8000")
-).rstrip("/")
+    or os.environ.get("COMMAND_NODE_URL")
+    or "http://172.16.244.124:8000"
+)
+
+if not args.no_ip_prompt and not args.command_node_url:
+    COMMAND_NODE_URL = prompt_server_url(default_target)
+    save_agent_server_url(COMMAND_NODE_URL)
+else:
+    COMMAND_NODE_URL = clean_server_url(default_target)
+
+test_server_connectivity(COMMAND_NODE_URL)
+os.environ["COMMAND_NODE_URL"] = COMMAND_NODE_URL
 
 OS_NAME = resolve_os(args.os_override)
 COMPATIBLE_COLLECTORS = collectors_for_platform(OS_NAME)
@@ -167,7 +272,7 @@ if getattr(args, "p2p_port", 0) > 0:
             agent_id=getattr(args, "agent_id", "agent-host-local"),
             bind_port=args.p2p_port,
             command_node_url=getattr(
-                args, "command_node_url", os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000")),
+                args, "command_node_url", os.environ.get("COMMAND_NODE_URL", "http://172.16.244.124:8000")),
         )
         _p2p_node.start()
         peers_str = getattr(args, "p2p_peers", "") or os.environ.get("P2P_PEERS", "")
@@ -718,6 +823,36 @@ def start_linux_ids() -> None:
 def main():
     print_banner(OS_NAME, PROFILE_NAME, COMPATIBLE_COLLECTORS)
 
+    agent_id = getattr(args, "agent_id", None) or os.environ.get("AGENT_ID", socket.gethostname())
+    emitter = None
+
+    # Start Heartbeat Emitter for silence-as-alarm monitoring
+    if not getattr(args, "no_heartbeat", False):
+        try:
+            from heartbeat import HeartbeatEmitter
+
+            def _send_heartbeat(payload: dict) -> None:
+                try:
+                    data = json.dumps(payload).encode("utf-8")
+                    req = urllib.request.Request(
+                        f"{COMMAND_NODE_URL}/api/heartbeat",
+                        data=data,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    urllib.request.urlopen(req, timeout=2.0)
+                except Exception:
+                    pass
+
+            emitter = HeartbeatEmitter(
+                agent_id=agent_id,
+                interval=float(os.environ.get("HEARTBEAT_INTERVAL", "5.0")),
+                send_fn=_send_heartbeat,
+            )
+            emitter.start()
+            print(f"[run_all] HeartbeatEmitter active for '{agent_id}' -> {COMMAND_NODE_URL}/api/heartbeat")
+        except Exception as exc:
+            print(f"[run_all] Warning: Could not start HeartbeatEmitter: {exc}")
+
     START_FNS = {
         "zero_day": start_zero_day,
         "cicids": start_cicids,
@@ -740,6 +875,26 @@ def main():
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n[run_all] Stopping...")
+        if emitter:
+            try:
+                emitter.stop()
+                # Send graceful departure beacon to Command Node so silence alarms are suppressed
+                shutdown_payload = {
+                    "agent_id": agent_id,
+                    "status": "OFFLINE_GRACEFUL",
+                    "reason": "USER_KEYBOARD_INTERRUPT",
+                    "timestamp": time.time(),
+                }
+                req = urllib.request.Request(
+                    f"{COMMAND_NODE_URL}/api/heartbeat/shutdown",
+                    data=json.dumps(shutdown_payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                )
+                urllib.request.urlopen(req, timeout=2.0)
+                print(f"[run_all] Graceful shutdown beacon sent for '{agent_id}'.")
+            except Exception:
+                pass
+
         for name, handle in _running_handles.items():
             stop = getattr(handle, "stop", None)
             if callable(stop):
