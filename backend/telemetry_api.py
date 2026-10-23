@@ -625,10 +625,11 @@ async def post_p2p_consensus(verdict: P2PConsensusPayload):
     """
     verdict_dict = verdict.model_dump()
 
-    # 1. Recalculate response action using the command-node policy.
-    # Never trust response_action supplied by a peer.
+    # 1. Evaluate policy authorization while preserving verdict's recommended action
     decision = decide_response(verdict_dict)
-    verdict_dict["response_action"] = decision["action"]
+    if not verdict_dict.get("response_action"):
+        verdict_dict["response_action"] = verdict_dict.get("recommended_action") or decision["action"]
+    verdict_dict["authorized_action"] = decision["action"]
     verdict_dict["response_policy_reason"] = decision["reason"]
 
     # 2. Record external verdict in CentralizedVotingCoordinator history for deduplication
@@ -853,17 +854,16 @@ async def post_centralized_vote(
             "[AEGIS DB] Failed to persist centralized verdict: %s", exc)
 
         # Re-evaluate the action before queueing it.
-    # The policy must be the authority, not the incoming action label.
     policy_input = dict(verdict)
     policy_input["details"] = details
     decision = decide_response(policy_input)
 
-    verdict["response_action"] = decision["action"]
+    verdict["authorized_action"] = decision["action"]
     verdict["response_policy_reason"] = decision["reason"]
     # ── Autonomous Remote Command Dispatcher: Auto-Enqueue Mitigation Actions ──
     action_dict = None
     response_act = verdict.get("response_action")
-    if response_act in ("KILL_PROCESS", "QUARANTINE_FILE", "ALERT"):
+    if response_act in ("KILL_PROCESS", "ISOLATE_HOST", "QUARANTINE_FILE", "ALERT"):
         try:
             async with get_session() as session:
                 target_pid = details.get("pid") or getattr(payload, "pid", None)

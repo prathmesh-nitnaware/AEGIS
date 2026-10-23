@@ -139,8 +139,8 @@ class CentralizedVotingCoordinator:
     RESPONSE_ACTIONS = {
         "LOW": "LOG",
         "MEDIUM": "ALERT",
-        "HIGH": "ALERT",
-        "CRITICAL": "ALERT",
+        "HIGH": "KILL_PROCESS",
+        "CRITICAL": "ISOLATE_HOST",
     }
 
     def __init__(
@@ -237,9 +237,11 @@ class CentralizedVotingCoordinator:
         with self._lock:
             if v_id and any(v.get("vote_id") == v_id for v in self._verdicts_history):
                 return
-            # Ensure response action is populated
+            # Ensure policy decision is populated without overriding recommended response action
             decision = decide_response(verdict_dict)
-            verdict_dict["response_action"] = decision["action"]
+            if "response_action" not in verdict_dict:
+                verdict_dict["response_action"] = verdict_dict.get("recommended_action") or decision["action"]
+            verdict_dict["authorized_action"] = decision["action"]
             verdict_dict["response_policy_reason"] = decision["reason"]
             self._verdicts_history.append(verdict_dict)
             if len(self._verdicts_history) > 1000:
@@ -303,9 +305,8 @@ class CentralizedVotingCoordinator:
             req, peer_responses, origin_trust=origin_trust, expected_peers=expected_peers
         )
 
-        # 4. Default to a non-destructive action.
-# The response policy decides whether any stronger action is authorized.
-        response_action = "ALERT"
+        # 4. Map severity to automated response action
+        recommended_action = self.RESPONSE_ACTIONS.get(verdict.severity, "LOG")
 
         result = {
             "vote_id": verdict.vote_id,
@@ -314,7 +315,8 @@ class CentralizedVotingCoordinator:
             "raw_threat_score": verdict.raw_threat_score,
             "final_weighted_score": verdict.final_weighted_score,
             "severity": verdict.severity,
-            "response_action": response_action,
+            "response_action": recommended_action,
+            "recommended_action": recommended_action,
             "consensus_reached": verdict.consensus_reached,
             "participating_peers": verdict.participating_peers,
             "total_weight": verdict.total_weight,
@@ -327,7 +329,7 @@ class CentralizedVotingCoordinator:
         }
 
         decision = decide_response(result)
-        result["response_action"] = decision["action"]
+        result["authorized_action"] = decision["action"]
         result["response_policy_reason"] = decision["reason"]
 
         with self._lock:

@@ -1,4 +1,5 @@
 import os
+import socket
 import subprocess
 import sys
 from collections import defaultdict, deque
@@ -173,8 +174,6 @@ class LinuxTelemetryCollector:
             }
             try:
                 import json
-                import os
-                import socket
                 import urllib.request
 
                 cmd_url = os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000").rstrip("/")
