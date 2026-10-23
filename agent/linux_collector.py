@@ -151,14 +151,20 @@ class LinuxTelemetryCollector:
             print()
 
             # Dispatch live telemetry event to backend API
+            agent_id = os.environ.get("AGENT_ID") or socket.gethostname() if "socket" in globals() else os.environ.get("AGENT_ID", "linux-agent")
             event = {
                 "timestamp": timestamp,
+                "agent_id": agent_id,
                 "pid": pid,
                 "uid": uid,
                 "process": process,
+                "process_name": process,
+                "model": "linux_ids",
+                "event_type": "linux_ids",
                 "syscall": sequence[-1] if sequence else 0,
                 "window_size": len(sequence),
                 "predicted_class": result["predicted_class"],
+                "verdict": result["predicted_class"],
                 "normal_probability": float(result["p_normal"]),
                 "threat_score": float(result["threat_score"]),
                 "probabilities": {
@@ -168,6 +174,7 @@ class LinuxTelemetryCollector:
             try:
                 import json
                 import os
+                import socket
                 import urllib.request
 
                 cmd_url = os.environ.get("COMMAND_NODE_URL", "http://172.16.244.124:8000").rstrip("/")
@@ -176,9 +183,11 @@ class LinuxTelemetryCollector:
                     data=json.dumps(event).encode("utf-8"),
                     headers={"Content-Type": "application/json"},
                 )
-                urllib.request.urlopen(req, timeout=1.5)
-            except Exception:
-                pass
+                with urllib.request.urlopen(req, timeout=3.0) as resp:
+                    if resp.status in (200, 201):
+                        print(f"  [+] Telemetry event delivered to Main Server ({cmd_url})")
+            except Exception as net_err:
+                print(f"  [!] Failed to deliver telemetry to {cmd_url}/api/telemetry: {net_err}")
 
 
         except Exception as e:

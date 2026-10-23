@@ -64,6 +64,14 @@ import RbacAuthTab from "./RbacAuthTab";
 import LivePeerVotingVisualization from "./LivePeerVotingVisualization";
 
 
+const API_BASE = typeof window !== "undefined"
+  ? `${window.location.protocol}//${window.location.hostname || "127.0.0.1"}:8000`
+  : "http://127.0.0.1:8000";
+
+const WS_BASE = typeof window !== "undefined"
+  ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname || "127.0.0.1"}:8000`
+  : "ws://127.0.0.1:8000";
+
 /* ═══════════════════════════════════════════════
    Comprehensive Syscall Mapping Dictionary
    ═══════════════════════════════════════════════ */
@@ -223,7 +231,7 @@ export default function App() {
 
   const fetchVerdicts = useCallback(async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/centralized/verdicts?limit=50");
+      const res = await fetch(`${API_BASE}/api/centralized/verdicts?limit=50`);
       const data = await res.json();
       if (data && data.verdicts) setVerdicts(data.verdicts);
     } catch (e) {
@@ -234,7 +242,7 @@ export default function App() {
   const fetchTelemetry = useCallback(async () => {
     setIsTelemetryLoading(true);
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/centralized/telemetry?limit=50");
+      const res = await fetch(`${API_BASE}/api/centralized/telemetry?limit=50`);
       const data = await res.json();
       if (data && Array.isArray(data.telemetries)) {
         setTelemetryRecords(data.telemetries);
@@ -248,7 +256,7 @@ export default function App() {
 
   const fetchMaintenance = useCallback(async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/maintenance/windows?active_only=false");
+      const res = await fetch(`${API_BASE}/api/maintenance/windows?active_only=false`);
       const data = await res.json();
       if (data && data.windows) setMaintenanceWindows(data.windows);
     } catch (e) {
@@ -258,7 +266,7 @@ export default function App() {
 
   const fetchSilenceAlarms = useCallback(async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/alerts");
+      const res = await fetch(`${API_BASE}/api/alerts`);
       const data = await res.json();
       if (data && data.alerts) setSilenceAlarms(data.alerts);
     } catch (e) {
@@ -268,7 +276,7 @@ export default function App() {
 
   const fetchAgentTrust = useCallback(async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/agents/trust/all");
+      const res = await fetch(`${API_BASE}/api/agents/trust/all`);
       const data = await res.json();
       if (data && data.agents) setAgentTrustMap(data.agents);
     } catch (e) {
@@ -278,7 +286,7 @@ export default function App() {
 
   const fetchAudit = useCallback(async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/audit?limit=50");
+      const res = await fetch(`${API_BASE}/api/audit?limit=50`);
       const data = await res.json();
       if (data && data.entries) setAuditLogs(data.entries);
     } catch (e) {
@@ -310,7 +318,7 @@ export default function App() {
 
   const handleTrustFeedback = async (voteId, confirmed) => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/trust/feedback", {
+      const res = await fetch(`${API_BASE}/api/trust/feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -343,7 +351,7 @@ export default function App() {
 
   const handleAcknowledgeAlarm = async (alarmId) => {
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/alerts/${alarmId}/ack`, {
+      const res = await fetch(`${API_BASE}/api/alerts/${alarmId}/ack`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ acknowledged_by: "SecOps Admin" }),
@@ -360,7 +368,7 @@ export default function App() {
   const handleScheduleMaintenance = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/maintenance/schedule", {
+      const res = await fetch(`${API_BASE}/api/maintenance/schedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -384,7 +392,7 @@ export default function App() {
 
   const handleCancelMaintenance = async (windowId) => {
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/maintenance/cancel?window_id=${windowId}`, {
+      const res = await fetch(`${API_BASE}/api/maintenance/cancel?window_id=${windowId}`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -402,7 +410,7 @@ export default function App() {
     const id1 = setInterval(() => setClock(new Date()), 1000);
     const fetchHealth = async () => {
       try {
-        const res = await fetch("http://127.0.0.1:8000/api/health");
+        const res = await fetch(`${API_BASE}/api/health`);
         const data = await res.json();
         if (data.uptime !== undefined) setServerUptime(Math.floor(data.uptime));
         if (data.platform) setHostOS(data.platform);
@@ -421,7 +429,7 @@ export default function App() {
   /* Trigger test telemetry event */
   const sendTestPulse = async () => {
     try {
-      await fetch("http://127.0.0.1:8000/api/telemetry/test", { method: "POST" });
+      await fetch(`${API_BASE}/api/telemetry/test`, { method: "POST" });
     } catch (err) {
       console.error("Test pulse error:", err);
     }
@@ -436,7 +444,7 @@ export default function App() {
     const connect = () => {
       if (stopped) return;
       setWsStatus("CONNECTING");
-      ws = new WebSocket("ws://127.0.0.1:8000/ws/telemetry");
+      ws = new WebSocket(`${WS_BASE}/ws/telemetry`);
 
       ws.onopen = () => setWsStatus("LIVE");
 
@@ -530,12 +538,14 @@ export default function App() {
 
           const procName = event.process || event.process_name || (event.file_path ? event.file_path.split(/[\/\\]/).pop() : null) || event.model || "unknown";
           const modelTag = (event.model || "event").toUpperCase();
+          const agentIdTag = event.agent_id || event.agentId || "local-node";
 
           // Update active processes/events table
           setProcesses((prev) => {
             const updated = [
               {
                 process: procName,
+                agent_id: agentIdTag,
                 model: modelTag,
                 pid: event.pid || 0,
                 uid: event.uid || 0,
@@ -559,8 +569,9 @@ export default function App() {
                 id: `${event.timestamp}-${event.pid || Math.random()}`,
                 severity: threatScore >= 0.6 ? "critical" : "warning",
                 process: procName,
+                agent_id: agentIdTag,
                 pid: event.pid || 0,
-                message: `[${modelTag}] Anomaly on ${procName} — ${
+                message: `[${modelTag}] (${agentIdTag}) Anomaly on ${procName} — ${
                   event.predicted_class || event.verdict || "MEDIUM"
                 } (${(threatScore * 100).toFixed(1)}% threat score)`,
                 time: timeStr,
@@ -592,7 +603,7 @@ export default function App() {
 
   /* Fetch initial latest state from backend */
   useEffect(() => {
-    fetch("http://127.0.0.1:8000/api/telemetry/latest")
+    fetch(`${API_BASE}/api/telemetry/latest`)
       .then((res) => res.json())
       .then((event) => {
         if (event && (typeof event.threat_score === "number" || typeof event.score === "number") && event.timestamp) {
@@ -612,7 +623,7 @@ export default function App() {
 
   /* Fetch initial agent heartbeat snapshot */
   useEffect(() => {
-    fetch("http://127.0.0.1:8000/api/agents")
+    fetch(`${API_BASE}/api/agents`)
       .then((res) => res.json())
       .then((data) => {
         const map = {};
@@ -1186,9 +1197,10 @@ export default function App() {
                   <thead>
                     <tr>
                       <th>Process Name</th>
+                      <th>Origin Node</th>
                       <th>PID</th>
                       <th>UID</th>
-                      <th>Last Syscall</th>
+                      <th>Last Syscall / Port</th>
                       <th>Threat Score</th>
                       <th>Prediction</th>
                       <th>Actions</th>
@@ -1196,12 +1208,17 @@ export default function App() {
                   </thead>
                   <tbody>
                     {processes.map((p) => (
-                      <tr key={p.pid} className={p.threat_score >= 0.35 ? "highlight-row" : ""}>
+                      <tr key={`${p.pid}-${p.process}`} className={p.threat_score >= 0.35 ? "highlight-row" : ""}>
                         <td>
                           <div className="process-cell">
                             <Terminal size={15} className="process-icon" />
                             <strong>{p.process}</strong>
                           </div>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: "11px", background: "rgba(56, 189, 248, 0.12)", color: "#38bdf8", padding: "2px 7px", borderRadius: "4px", border: "1px solid rgba(56, 189, 248, 0.3)", fontWeight: 600 }}>
+                            {p.agent_id || "node"}
+                          </span>
                         </td>
                         <td><code>{p.pid}</code></td>
                         <td><code>{p.uid}</code></td>
@@ -2272,7 +2289,7 @@ export default function App() {
         <ReportModal
           isOpen={isReportModalOpen}
           onClose={() => setIsReportModalOpen(false)}
-          apiBase="http://127.0.0.1:8000"
+          apiBase={API_BASE}
         />
 
         {/* Explainable AI (XAI) Modal */}
@@ -2282,7 +2299,7 @@ export default function App() {
           modelKey={xaiModalConfig.modelKey}
           threatScore={xaiModalConfig.threatScore}
           eventData={xaiModalConfig.eventData}
-          apiBase="http://127.0.0.1:8000"
+          apiBase={API_BASE}
         />
       </main>
     </div>

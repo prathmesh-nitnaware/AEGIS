@@ -12,6 +12,10 @@ import {
   Lock,
 } from "lucide-react";
 
+const API_BASE = typeof window !== "undefined"
+  ? `${window.location.protocol}//${window.location.hostname || "127.0.0.1"}:8000`
+  : "http://127.0.0.1:8000";
+
 export default function FleetManagementTab() {
   const [fleetAgents, setFleetAgents] = useState([]);
   const [selectedAgent, setSelectedAgent] = useState("endpoint-linux");
@@ -34,7 +38,7 @@ export default function FleetManagementTab() {
 
   const fetchInventory = useCallback(async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/fleet/inventory");
+      const res = await fetch(`${API_BASE}/api/fleet/inventory`);
       if (res.ok) {
         const data = await res.json();
         setFleetAgents(data.agents || []);
@@ -50,7 +54,7 @@ export default function FleetManagementTab() {
 
   const handlePushConfig = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/fleet/config/push", {
+      const res = await fetch(`${API_BASE}/api/fleet/config/push`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -70,7 +74,7 @@ export default function FleetManagementTab() {
 
   const handleVerifyPackage = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/fleet/packages/verify", {
+      const res = await fetch(`${API_BASE}/api/fleet/packages/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

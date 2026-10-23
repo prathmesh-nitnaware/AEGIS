@@ -395,25 +395,42 @@ def _trigger_peer_voting_async(model: str, score: float, verdict: str, extra: di
     threading.Thread(target=_dispatch_vote, daemon=True).start()
 
 
-def _post_event_async(event_payload: dict):
+_last_telemetry_error_time = 0.0
+_telemetry_delivered_count = 0
+
+
+def _post_event_async(event_payload: dict) -> None:
     def _send():
+        global _last_telemetry_error_time, _telemetry_delivered_count
+        target_url = (
+            getattr(args, 'command_node_url', None)
+            or os.environ.get('COMMAND_NODE_URL')
+            or COMMAND_NODE_URL
+        ).rstrip('/')
         try:
             import urllib.request
-            cmd_url = getattr(args, 'command_node_url', os.environ.get('COMMAND_NODE_URL', 'http://127.0.0.1:8000')).rstrip('/')
             req = urllib.request.Request(
-                f"{COMMAND_NODE_URL}/api/telemetry",
+                f"{target_url}/api/telemetry",
                 data=json.dumps(event_payload, default=str).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
             )
-            urllib.request.urlopen(req, timeout=1.5)
-        except Exception:
-            pass
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                if resp.status in (200, 201):
+                    _telemetry_delivered_count += 1
+                    if _telemetry_delivered_count in (1, 5, 10, 25, 50, 100):
+                        print(f"  [+] Shipped telemetry event #{_telemetry_delivered_count} ({event_payload.get('model')}) to Main Server ({target_url})")
+        except Exception as exc:
+            now = time.time()
+            if now - _last_telemetry_error_time > 10.0:
+                _last_telemetry_error_time = now
+                print(f"  [!] Telemetry delivery to {target_url}/api/telemetry failed: {exc}")
     threading.Thread(target=_send, daemon=True).start()
 
 
 def save_event(model: str, score: Optional[float], verdict: str, **extra):
     """Append one scored event as a JSON line to telemetry_scores.jsonl and POST to backend API."""
     ts = datetime.now(timezone.utc).isoformat()
+    current_agent_id = getattr(args, "agent_id", None) or os.environ.get("AGENT_ID", socket.gethostname())
 
     # Analytical precision: store exact float or None without destructive rounding
     raw_score = float(score) if score is not None else None
@@ -432,6 +449,7 @@ def save_event(model: str, score: Optional[float], verdict: str, **extra):
 
     event = {
         "timestamp": ts,
+        "agent_id": current_agent_id,
         "model": model,
         "score": raw_score,
         "score_status": score_status,
@@ -447,15 +465,20 @@ def save_event(model: str, score: Optional[float], verdict: str, **extra):
     # Distinguish None from 0.0: do NOT coerce None to 0.0
     threat_score = raw_score
     norm_prob = (1.0 - threat_score) if threat_score is not None else None
+    proc_name = extra.get("process_name", extra.get("process", extra.get("file_path", model)))
     api_payload = {
         "timestamp": ts,
+        "agent_id": current_agent_id,
         "model": model,
+        "event_type": model,
         "threat_score": threat_score,
         "score_status": score_status,
         "predicted_class": verdict,
+        "verdict": verdict,
         "pid": extra.get("pid", 0),
         "uid": extra.get("uid", 0),
-        "process": extra.get("process_name", extra.get("process", extra.get("file_path", model))),
+        "process": proc_name,
+        "process_name": proc_name,
         "normal_probability": norm_prob,
         "probabilities": {
             "Normal": norm_prob,

@@ -393,6 +393,23 @@ async def post_telemetry(event: dict):
     Primary ingestion endpoint. Persists every event to NeonDB,
     updates the in-memory service, and broadcasts to dashboards.
     """
+    agent_id = event.get("agent_id") or event.get("agentId") or "unknown-agent"
+    model = event.get("model") or event.get("event_type") or "telemetry"
+    threat_score = event.get("threat_score", event.get("score", 0.0))
+    verdict = event.get("predicted_class", event.get("verdict", "NORMAL"))
+    proc_name = event.get("process") or event.get("process_name") or "unknown"
+    pid = event.get("pid", 0)
+
+    logger.info(
+        "[AEGIS Telemetry Ingest] Agent: %-18s | Model: %-12s | Threat: %.3f (%s) | Process: %s (PID: %s)",
+        agent_id,
+        model,
+        float(threat_score) if threat_score is not None else 0.0,
+        verdict,
+        proc_name,
+        pid,
+    )
+
     # Legacy in-memory service (keeps existing /api/telemetry/* routes working)
     add_event(event)
     central_repo.add_telemetry(event)
