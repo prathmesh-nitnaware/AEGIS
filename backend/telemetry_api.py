@@ -812,12 +812,12 @@ async def post_centralized_vote(
     if response_act in ("KILL_PROCESS", "ISOLATE_HOST", "QUARANTINE_FILE", "ALERT"):
         try:
             async with get_session() as session:
-                target_pid = details.get("pid") or payload.get("pid")
+                target_pid = details.get("pid") or getattr(payload, "pid", None)
                 target_file = (
                     details.get("target_file")
                     or details.get("filename")
                     or details.get("file_path")
-                    or payload.get("target_file")
+                    or getattr(payload, "target_file", None)
                 )
                 action_row = await enqueue_remote_action(
                     session=session,
