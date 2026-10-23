@@ -182,15 +182,21 @@ class CentralizedVotingCoordinator:
             is_corr = False
             # Correlation checks:
             if req.event_type == "network":
-                if (local_details.get("port") and local_details.get("port") == req_details.get("port")) or \
-                   (local_details.get("dest_ip") and local_details.get("dest_ip") == req_details.get("dest_ip")):
+                local_port = local_details.get("port") or local_details.get("destination_port")
+                req_port = req_details.get("port") or req_details.get("destination_port")
+                local_ip = local_details.get("dest_ip") or local_details.get("ip")
+                req_ip = req_details.get("dest_ip") or req_details.get("ip")
+                if (local_port and local_port == req_port) or (local_ip and local_ip == req_ip):
                     is_corr = True
             elif req.event_type in ("process_linux", "process_windows"):
-                if (local_details.get("process") and local_details.get("process") == req_details.get("process")) or \
-                   (local_details.get("pid") and local_details.get("pid") == req_details.get("pid")):
+                local_proc = str(local_details.get("process") or local_details.get("process_name") or "").lower().strip()
+                req_proc = str(req_details.get("process") or req_details.get("process_name") or "").lower().strip()
+                if local_proc and local_proc == req_proc:
                     is_corr = True
             elif req.event_type in ("file", "log_line"):
-                if local_details.get("filename") and local_details.get("filename") == req_details.get("filename"):
+                local_file = str(local_details.get("filename") or local_details.get("file_path") or "").lower().strip()
+                req_file = str(req_details.get("filename") or req_details.get("file_path") or "").lower().strip()
+                if local_file and (local_file == req_file or local_file.endswith(req_file) or req_file.endswith(local_file)):
                     is_corr = True
 
             current_corr, current_score = peer_observations.get(peer_id, (False, 0.0))

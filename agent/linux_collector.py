@@ -102,7 +102,7 @@ class LinuxTelemetryCollector:
 
         try:
 
-            result = self.model.predict(sequence)
+            result = self.model.predict(sequence, process_name=process)
 
             print()
             print("========================================")
@@ -169,8 +169,9 @@ class LinuxTelemetryCollector:
                 import json
                 import urllib.request
 
+                cmd_base = os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000").rstrip("/")
                 req = urllib.request.Request(
-                    "http://127.0.0.1:8000/api/telemetry",
+                    f"{cmd_base}/api/telemetry",
                     data=json.dumps(event).encode("utf-8"),
                     headers={"Content-Type": "application/json"},
                 )

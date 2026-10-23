@@ -388,19 +388,25 @@ class PeerCorrelationEngine:
 
                 # Correlation rules across event types:
                 if req.event_type == "network":
-                    if (local_details.get("port") and local_details.get("port") == req_details.get("port")) or \
-                       (local_details.get("dest_ip") and local_details.get("dest_ip") == req_details.get("dest_ip")):
+                    local_port = local_details.get("port") or local_details.get("destination_port")
+                    req_port = req_details.get("port") or req_details.get("destination_port")
+                    local_ip = local_details.get("dest_ip") or local_details.get("ip")
+                    req_ip = req_details.get("dest_ip") or req_details.get("ip")
+                    if (local_port and local_port == req_port) or (local_ip and local_ip == req_ip):
                         logger.info("[CorrelationEngine] Match found on network details: %s", req_details)
                         return True, req.threat_score
 
                 elif req.event_type in ("process_linux", "process_windows"):
-                    if (local_details.get("process") and local_details.get("process") == req_details.get("process")) or \
-                       (local_details.get("pid") and local_details.get("pid") == req_details.get("pid")):
+                    local_proc = str(local_details.get("process") or local_details.get("process_name") or "").lower().strip()
+                    req_proc = str(req_details.get("process") or req_details.get("process_name") or "").lower().strip()
+                    if local_proc and local_proc == req_proc:
                         logger.info("[CorrelationEngine] Match found on process details: %s", req_details)
                         return True, req.threat_score
 
                 elif req.event_type in ("file", "log_line"):
-                    if local_details.get("filename") and local_details.get("filename") == req_details.get("filename"):
+                    local_file = str(local_details.get("filename") or local_details.get("file_path") or "").lower().strip()
+                    req_file = str(req_details.get("filename") or req_details.get("file_path") or "").lower().strip()
+                    if local_file and (local_file == req_file or local_file.endswith(req_file) or req_file.endswith(local_file)):
                         logger.info("[CorrelationEngine] Match found on file details: %s", req_details)
                         return True, req.threat_score
 
@@ -820,10 +826,15 @@ class P2PMeshNode:
                 # 4. Cryptographic signature and identity verification
                 with self._lock:
                     peer_key = self._peer_keys.get(req.origin_agent_id)
-                    is_registered = req.origin_agent_id in self._peers
+                    is_registered = (
+                        req.origin_agent_id in self._peers
+                        or any(addr[0] == sender_addr[0] for addr in self._peers.values())
+                    )
+                    if is_registered and req.origin_agent_id not in self._peers:
+                        self._peers[req.origin_agent_id] = sender_addr
 
                 if not is_registered:
-                    logger.warning("[P2PMesh] Rejecting VotingRequest from unknown peer identity: %s", req.origin_agent_id)
+                    logger.warning("[P2PMesh] Rejecting VotingRequest from unknown peer identity: %s (addr=%s)", req.origin_agent_id, sender_addr)
                     return
 
                 # If peer is registered but public key was not pre-shared, bind from valid signed request
@@ -867,11 +878,16 @@ class P2PMeshNode:
                         return
 
                     peer_key = self._peer_keys.get(resp.peer_agent_id)
-                    is_registered = resp.peer_agent_id in self._peers
+                    is_registered = (
+                        resp.peer_agent_id in self._peers
+                        or any(addr[0] == sender_addr[0] for addr in self._peers.values())
+                    )
+                    if is_registered and resp.peer_agent_id not in self._peers:
+                        self._peers[resp.peer_agent_id] = sender_addr
 
                 # 3. Check registered peer identity
                 if not is_registered:
-                    logger.warning("[P2PMesh] Rejecting VotingResponse from unknown peer identity: %s", resp.peer_agent_id)
+                    logger.warning("[P2PMesh] Rejecting VotingResponse from unknown peer identity: %s (addr=%s)", resp.peer_agent_id, sender_addr)
                     return
 
                 # If peer is registered but public key was not pre-shared, bind from response

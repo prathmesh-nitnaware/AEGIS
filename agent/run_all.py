@@ -116,12 +116,16 @@ parser.add_argument(
     help="Enable P2P mesh node on this UDP port (0 to disable UDP server, default: 0).",
 )
 parser.add_argument(
+    "--p2p-peers", dest="p2p_peers", default=os.environ.get("P2P_PEERS", ""),
+    help="Comma-separated list of peer addresses for P2P mesh (e.g. 192.168.0.105:9001).",
+)
+parser.add_argument(
     "--agent-id", dest="agent_id", default="agent-host-local",
     help="Agent ID identifier for peer voting and telemetry (default: agent-host-local).",
 )
 parser.add_argument(
-    "--command-node", dest="command_node_url", default="http://192.168.0.102:8000",
-    help="URL of central command node (default: http://127.0.0.1:8000).",
+    "--command-node", dest="command_node_url", default=os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000"),
+    help="URL of central command node (default: http://127.0.0.1:8000 or $COMMAND_NODE_URL).",
 )
 args, _ = parser.parse_known_args()
 
@@ -154,11 +158,17 @@ if getattr(args, "p2p_port", 0) > 0:
             agent_id=getattr(args, "agent_id", "agent-host-local"),
             bind_port=args.p2p_port,
             command_node_url=getattr(
-                args, "command_node_url", "http://192.168.0.102:8000"),
+                args, "command_node_url", os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000")),
         )
         _p2p_node.start()
+        peers_str = getattr(args, "p2p_peers", "") or os.environ.get("P2P_PEERS", "")
+        for peer in peers_str.split(","):
+            peer = peer.strip()
+            if ":" in peer:
+                h, p = peer.split(":", 1)
+                _p2p_node.register_peer(peer_agent_id=f"peer-{h}", host=h, port=int(p))
         print(
-            f"[run_all] P2P Wire Mesh node listening on UDP port {args.p2p_port}")
+            f"[run_all] P2P Wire Mesh node listening on UDP port {args.p2p_port} (peers: {len(_p2p_node._peers)})")
     except Exception as exc:
         print(f"[run_all] Warning: P2P Wire Mesh start failed: {exc}")
 
@@ -258,8 +268,9 @@ def _trigger_peer_voting_async(model: str, score: float, verdict: str, extra: di
                 "pid": extra.get("pid"),
                 "target_file": extra.get("file_path") or extra.get("filename"),
             }
+            cmd_url = getattr(args, 'command_node_url', os.environ.get('COMMAND_NODE_URL', 'http://127.0.0.1:8000')).rstrip('/')
             req = urllib.request.Request(
-                f"{getattr(args, 'command_node_url', 'http://192.168.0.102:8000').rstrip('/')}/api/centralized/vote",
+                f"{cmd_url}/api/centralized/vote",
                 data=json.dumps(payload, default=str).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
             )
@@ -274,8 +285,9 @@ def _post_event_async(event_payload: dict):
     def _send():
         try:
             import urllib.request
+            cmd_url = getattr(args, 'command_node_url', os.environ.get('COMMAND_NODE_URL', 'http://127.0.0.1:8000')).rstrip('/')
             req = urllib.request.Request(
-                "http://192.168.0.102:8000/api/telemetry",
+                f"{cmd_url}/api/telemetry",
                 data=json.dumps(event_payload, default=str).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
             )
@@ -419,8 +431,14 @@ def start_cicids() -> None:
                     (dst_ip in LOCAL_IPS or dst_ip.startswith("127."))
                 )
 
-                # 1. Localhost internal management & DB traffic (PostgreSQL 5432, API 8000, UI 5173/5174, P2P 5555/5556)
-                if is_local and (dest_port in AEGIS_MANAGEMENT_PORTS or dest_port > 49151):
+                # Check if this flow is AEGIS management traffic (port 8000, 5432, 5173/5174, P2P mesh)
+                # whether over 127.0.0.1 loopback OR across a VM/LAN bridge to the central Command Node.
+                cmd_url = getattr(args, "command_node_url", "")
+                cmd_host = urllib.parse.urlparse(cmd_url).hostname if cmd_url else None
+                is_command_node = bool(cmd_host and (dst_ip == cmd_host or src_ip == cmd_host))
+
+                # 1. Internal management, Command Node API & DB traffic
+                if dest_port in AEGIS_MANAGEMENT_PORTS or is_command_node or (is_local and dest_port > 49151):
                     score = 0.05
                     verdict = "LOW"
                     flow_type = "INTERNAL_IPC"
