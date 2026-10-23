@@ -893,6 +893,20 @@ def main():
         except Exception as exc:
             print(f"[run_all] Warning: Could not start HeartbeatEmitter: {exc}")
 
+    action_daemon = None
+    try:
+        from action_consumer import ActionConsumerDaemon
+
+        action_daemon = ActionConsumerDaemon(
+            agent_id=agent_id,
+            command_node_url=COMMAND_NODE_URL,
+            poll_interval=2.0,
+        )
+        action_daemon.start()
+        print(f"[run_all] Autonomous Action Consumer active for '{agent_id}' -> {COMMAND_NODE_URL}/api/agents/{agent_id}/actions/pending")
+    except Exception as exc:
+        print(f"[run_all] Note: Could not auto-start ActionConsumerDaemon ({exc}).")
+
     START_FNS = {
         "zero_day": start_zero_day,
         "cicids": start_cicids,
@@ -932,6 +946,12 @@ def main():
                 )
                 urllib.request.urlopen(req, timeout=2.0)
                 print(f"[run_all] Graceful shutdown beacon sent for '{agent_id}'.")
+            except Exception:
+                pass
+
+        if action_daemon:
+            try:
+                action_daemon.stop()
             except Exception:
                 pass
 

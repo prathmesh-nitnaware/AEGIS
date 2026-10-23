@@ -90,7 +90,17 @@ class ActionConsumerDaemon:
         )
 
         try:
-            if action_type == "KILL_PROCESS":
+            if action_type == "SUSPEND_PROCESS":
+                if not target_pid:
+                    return {"status": "failed", "reason": "Missing target_pid for SUSPEND_PROCESS"}
+                return self.driver.suspend_process(int(target_pid))
+
+            elif action_type == "RESUME_PROCESS":
+                if not target_pid:
+                    return {"status": "failed", "reason": "Missing target_pid for RESUME_PROCESS"}
+                return self.driver.resume_process(int(target_pid))
+
+            elif action_type == "KILL_PROCESS":
                 if not target_pid:
                     return {"status": "failed", "reason": "Missing target_pid for KILL_PROCESS"}
                 return self.driver.kill_process(int(target_pid))
@@ -184,10 +194,12 @@ class ActionConsumerDaemon:
             exec_result = self.execute_action(action)
             raw_status = exec_result.get("status", "failed").lower()
 
-            if raw_status in ("success", "alert_raised", "not_found"):
+            if raw_status in ("success", "executed", "alert_raised", "not_found"):
                 status = "SUCCESS"
-            elif raw_status == "simulated_success":
+            elif raw_status in ("simulated_success", "simulated"):
                 status = "SIMULATED_SUCCESS"
+            elif raw_status == "denied":
+                status = "DENIED"
             else:
                 status = "FAILED"
 

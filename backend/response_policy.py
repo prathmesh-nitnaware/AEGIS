@@ -12,8 +12,17 @@ import math
 import os
 from typing import Any, Mapping
 
-ALLOWED_ACTIONS = {"LOG", "ALERT", "KILL_PROCESS", "QUARANTINE_FILE", "ISOLATE_HOST"}
-DESTRUCTIVE_ACTIONS = {"KILL_PROCESS", "QUARANTINE_FILE", "ISOLATE_HOST"}
+ALLOWED_ACTIONS = {"LOG", "ALERT", "SUSPEND_PROCESS", "RESUME_PROCESS", "KILL_PROCESS", "QUARANTINE_FILE", "ISOLATE_HOST"}
+DESTRUCTIVE_ACTIONS = {"KILL_PROCESS", "QUARANTINE_FILE", "ISOLATE_HOST", "SUSPEND_PROCESS"}
+
+PROTECTED_PROCESSES = {
+    "systemd", "init", "sshd", "dockerd", "containerd", "journald",
+    "systemd-journald", "systemd-udevd", "udevd", "dbus-daemon", "auditd",
+    "rsyslogd", "cron", "crond", "polkitd", "agetty", "kthreadd",
+    "system", "system idle process", "smss.exe", "csrss.exe", "wininit.exe",
+    "services.exe", "lsass.exe", "svchost.exe", "explorer.exe", "winlogon.exe",
+    "dwm.exe", "spoolsv.exe", "python", "python.exe", "python3",
+}
 
 
 def _enabled(name: str, default: bool = False) -> bool:
@@ -60,8 +69,13 @@ def decide_response(verdict: Mapping[str, Any]) -> dict[str, Any]:
                 pid_int = int(pid)
             except (TypeError, ValueError):
                 pid_int = -1
-            if pid_int > 1 and process_name and str(process_name).strip():
-                proposed = "KILL_PROCESS"
+            clean_name = str(process_name or "").lower().strip()
+            # Immune system guard: never kill or suspend critical system daemons or protected processes
+            if pid_int > 1 and clean_name and clean_name not in PROTECTED_PROCESSES:
+                if verdict.get("recommended_action") == "SUSPEND_PROCESS" or _enabled("AEGIS_SUSPEND_FIRST", False):
+                    proposed = "SUSPEND_PROCESS"
+                else:
+                    proposed = "KILL_PROCESS"
 
         if score >= float(os.getenv("AEGIS_QUARANTINE_THRESHOLD", "0.90")):
             file_path = (details.get("target_file") or details.get("file_path")
@@ -72,7 +86,7 @@ def decide_response(verdict: Mapping[str, Any]) -> dict[str, Any]:
                     proposed = "QUARANTINE_FILE"
 
     if proposed == "ISOLATE_HOST":
-        proposed = "ALERT"  # fail closed: no host-isolation executor implemented
+        proposed = "ALERT"  # fail closed: host isolation permanently disabled to prevent lockout
 
     return {
         "action": proposed,

@@ -47,6 +47,52 @@ logging.basicConfig(
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
 )
 
+PROTECTED_PROCESS_NAMES = {
+    # Linux core system daemons
+    "systemd", "init", "sshd", "dockerd", "containerd", "journald",
+    "systemd-journald", "systemd-udevd", "udevd", "dbus-daemon", "auditd",
+    "rsyslogd", "cron", "crond", "polkitd", "agetty", "kthreadd",
+    # Windows core system processes
+    "system", "system idle process", "smss.exe", "csrss.exe", "wininit.exe",
+    "services.exe", "lsass.exe", "svchost.exe", "explorer.exe", "winlogon.exe",
+    "dwm.exe", "spoolsv.exe",
+}
+
+PROTECTED_SYSTEM_DIRECTORIES = (
+    "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/lib", "/lib64",
+    "/etc", "/boot", "/dev", "/proc", "/sys",
+    "c:\\windows", "c:\\program files", "c:\\program files (x86)",
+)
+
+
+def is_protected_process(pid: int) -> Tuple[bool, str]:
+    """Determines if a PID belongs to the OS kernel, critical daemons, or AEGIS agent itself."""
+    if pid <= 4:
+        return True, "Protected system PID"
+
+    try:
+        my_pid = os.getpid()
+        if pid == my_pid:
+            return True, "Protected AEGIS agent process"
+        if hasattr(os, "getppid") and pid == os.getppid():
+            return True, "Protected AEGIS parent process"
+    except Exception:
+        pass
+
+    try:
+        proc = psutil.Process(pid)
+        name = proc.name().lower().strip()
+        if name in PROTECTED_PROCESS_NAMES:
+            return True, f"Protected core operating system daemon: {name}"
+
+        cmdline = " ".join(proc.cmdline() or []).lower()
+        if any(core in cmdline for core in ("run_all.py", "telemetry_api.py", "command_node.py", "sshd")):
+            return True, "Protected critical management service"
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        pass
+
+    return False, ""
+
 
 class AgentResponseDriver:
     """
@@ -58,13 +104,23 @@ class AgentResponseDriver:
         self,
         quarantine_dir: str = ".aegis_quarantine",
         audit_log_path: str = "aegis_audit.log",
-        command_node_ip: str = "172.16.242.184",
+        command_node_ip: Optional[str] = None,
         response_mode: Optional[str] = None,
         simulation_mode: Optional[bool] = None,
     ) -> None:
         self.quarantine_dir = Path(quarantine_dir).resolve()
         self.audit_log_path = Path(audit_log_path).resolve()
-        self.command_node_ip = command_node_ip
+        if command_node_ip is None:
+            try:
+                from agent.config import get_command_node_url
+                import urllib.parse
+                url = get_command_node_url("http://127.0.0.1:8000")
+                parsed = urllib.parse.urlparse(url)
+                self.command_node_ip = parsed.hostname or "127.0.0.1"
+            except Exception:
+                self.command_node_ip = "127.0.0.1"
+        else:
+            self.command_node_ip = command_node_ip
         # Response mode: "real" or "simulation"
         if simulation_mode is not None:
             self.response_mode = "simulation" if simulation_mode else "real"
@@ -93,14 +149,97 @@ class AgentResponseDriver:
 
         return {"status": "EXECUTED", "record": record}
 
+    def suspend_process(self, pid: int) -> Dict[str, Any]:
+        """
+        Freeze/suspend a target process PID and its children (SIGSTOP / NtSuspendProcess).
+        Instantly halts CPU and network activity without terminating the process or losing data.
+        """
+        logger.info("[ResponseDriver] Attempting SUSPEND_PROCESS for PID %d (mode=%s)", pid, self.response_mode)
+        is_sim = (self.response_mode == "simulation")
+        is_prot, prot_reason = is_protected_process(pid)
+        if is_prot:
+            res = {"status": "DENIED", "reason": prot_reason, "target_pid": pid, "simulation": is_sim}
+            self.log_action("SUSPEND_PROCESS", res)
+            return res
+
+        if is_sim:
+            res = {"status": "SIMULATED", "target_pid": pid, "mode": "simulation", "simulation": True}
+            self.log_action("SUSPEND_PROCESS", res)
+            return res
+
+        suspended_pids: List[int] = []
+        try:
+            parent = psutil.Process(pid)
+            children = parent.children(recursive=True)
+
+            for child in children:
+                try:
+                    child.suspend()
+                    suspended_pids.append(child.pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+            parent.suspend()
+            suspended_pids.append(pid)
+            logger.info("[ResponseDriver] Successfully suspended PID %d (and %d children)", pid, len(children))
+            res = {"status": "EXECUTED", "target_pid": pid, "suspended_pids": suspended_pids, "simulation": False}
+        except psutil.NoSuchProcess:
+            logger.warning("[ResponseDriver] Process PID %d not found (already exited)", pid)
+            res = {"status": "NOT_FOUND", "target_pid": pid, "simulation": False}
+        except psutil.AccessDenied as exc:
+            logger.error("[ResponseDriver] Access denied suspending PID %d: %s", pid, exc)
+            res = {"status": "DENIED", "reason": str(exc), "target_pid": pid, "simulation": False}
+        except Exception as exc:
+            logger.error("[ResponseDriver] Error suspending PID %d: %s", pid, exc)
+            res = {"status": "FAILED", "reason": str(exc), "target_pid": pid, "simulation": False}
+
+        self.log_action("SUSPEND_PROCESS", res)
+        return res
+
+    def resume_process(self, pid: int) -> Dict[str, Any]:
+        """
+        Unfreeze/resume a previously suspended process PID and its children (SIGCONT).
+        """
+        logger.info("[ResponseDriver] Attempting RESUME_PROCESS for PID %d (mode=%s)", pid, self.response_mode)
+        is_sim = (self.response_mode == "simulation")
+        if is_sim:
+            res = {"status": "SIMULATED", "target_pid": pid, "mode": "simulation", "simulation": True}
+            self.log_action("RESUME_PROCESS", res)
+            return res
+
+        resumed_pids: List[int] = []
+        try:
+            parent = psutil.Process(pid)
+            children = parent.children(recursive=True)
+            for child in children:
+                try:
+                    child.resume()
+                    resumed_pids.append(child.pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            parent.resume()
+            resumed_pids.append(pid)
+            logger.info("[ResponseDriver] Successfully resumed PID %d", pid)
+            res = {"status": "EXECUTED", "target_pid": pid, "resumed_pids": resumed_pids, "simulation": False}
+        except psutil.NoSuchProcess:
+            res = {"status": "NOT_FOUND", "target_pid": pid, "simulation": False}
+        except psutil.AccessDenied as exc:
+            res = {"status": "DENIED", "reason": str(exc), "target_pid": pid, "simulation": False}
+        except Exception as exc:
+            res = {"status": "FAILED", "reason": str(exc), "target_pid": pid, "simulation": False}
+
+        self.log_action("RESUME_PROCESS", res)
+        return res
+
     def kill_process(self, pid: int) -> Dict[str, Any]:
         """
         Terminate a target process PID and its entire child process tree.
         """
         logger.info("[ResponseDriver] Attempting KILL_PROCESS for PID %d (mode=%s)", pid, self.response_mode)
         is_sim = (self.response_mode == "simulation")
-        if pid <= 4:
-            res = {"status": "DENIED", "reason": "Protected system PID", "target_pid": pid, "simulation": is_sim}
+        is_prot, prot_reason = is_protected_process(pid)
+        if is_prot:
+            res = {"status": "DENIED", "reason": prot_reason, "target_pid": pid, "simulation": is_sim}
             self.log_action("KILL_PROCESS", res)
             return res
 
@@ -141,11 +280,23 @@ class AgentResponseDriver:
     def quarantine_file(self, file_path: str) -> Dict[str, Any]:
         """
         Move a suspicious binary file to the secure quarantine folder.
+        Safely blocks moving files located in core operating system directories.
         """
         p = Path(file_path).resolve()
         logger.info("[ResponseDriver] Attempting QUARANTINE_FILE for '%s'", p)
 
         is_sim = (self.response_mode == "simulation")
+        p_str = str(p).lower()
+        if any(p_str.startswith(d.lower()) for d in PROTECTED_SYSTEM_DIRECTORIES):
+            res = {
+                "status": "DENIED",
+                "reason": f"Protected system directory: {p}",
+                "path": str(p),
+                "simulation": is_sim,
+            }
+            self.log_action("QUARANTINE_FILE", res)
+            return res
+
         if not p.exists() or not p.is_file():
             res = {"status": "NOT_FOUND", "reason": "File does not exist", "path": str(p), "simulation": is_sim}
             self.log_action("QUARANTINE_FILE", res)
@@ -181,13 +332,9 @@ class AgentResponseDriver:
 
     def isolate_host(self, command_node_ip: Optional[str] = None) -> Dict[str, Any]:
         """
-        Apply local OS firewall rules to isolate the host while still
-        permitting outbound communication to the Command Node.
-
-        Returns explicit status:
-        - SIMULATED: when in simulation mode or fallback without root/admin.
-        - EXECUTED: when firewall rules were genuinely applied.
-        - FAILED / PARTIAL / DENIED: on real failure.
+        Host network isolation handler.
+        In simulation mode, records simulated state.
+        In real mode, blocks real network drops to prevent irreversible machine lockout.
         """
         cn_ip = command_node_ip or self.command_node_ip
         logger.info("[ResponseDriver] Executing ISOLATE_HOST (Command Node IP=%s, mode=%s)", cn_ip, self.response_mode)
@@ -206,6 +353,14 @@ class AgentResponseDriver:
             res = {"status": "SIMULATED", "details": details, "simulation": True}
             self.log_action("ISOLATE_HOST", res)
             return res
+
+        # Anti-lockout policy override for real host enforcement
+        logger.warning("[ResponseDriver] Real host network isolation blocked by anti-lockout safety policy.")
+        self.is_isolated = True
+        details["safety_override"] = "Real network isolation blocked by safety policy to prevent machine lockout"
+        res = {"status": "SIMULATED", "details": details, "simulation": True}
+        self.log_action("ISOLATE_HOST", res)
+        return res
 
         # Real Mode Execution
         if os_type == "Windows":
