@@ -165,8 +165,10 @@ else:
     allowed_origins = [
         "http://localhost:3000",
         "http://localhost:5173",
+        "http://localhost:5174",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
     ]
 
 app.add_middleware(
@@ -1466,6 +1468,78 @@ async def reset_simulation_endpoint():
     from backend.services.simulation_service import reset_simulation_state
     reset_simulation_state()
     return {"status": "reset", "message": "Simulation status reset successfully."}
+
+
+@app.post("/api/attack/probe")
+async def probe_attack_target_endpoint(payload: dict):
+    """Actively probes target IP address and ports."""
+    from backend.services.simulation_service import probe_target
+    ip = payload.get("ip", "127.0.0.1")
+    port = payload.get("port")
+    return probe_target(ip=ip, port=port)
+
+
+@app.post("/api/attack/command")
+async def run_attack_c2_command_endpoint(payload: dict):
+    """Executes interactive Red Team C2 CLI command from the attack dashboard terminal."""
+    from backend.services.simulation_service import execute_terminal_command
+    command = payload.get("command", "")
+    return execute_terminal_command(command)
+
+
+@app.get("/api/attack/export")
+async def export_attack_campaign_report_endpoint():
+    """Exports structured Red Team penetration testing and campaign engagement audit report."""
+    from backend.services.simulation_service import export_campaign_report
+    return export_campaign_report()
+
+
+@app.get("/api/attack/payloads")
+async def list_attack_payload_templates_endpoint():
+    """Returns catalog of configurable adversary payloads and shellcode templates."""
+    return [
+        {
+            "id": "meterpreter_linux_x64",
+            "name": "Java / Linux x64 Meterpreter Reverse TCP",
+            "category": "Command & Control / Reverse Shell",
+            "default_port": 4444,
+            "architecture": "x86_64",
+            "description": "Stages multi-thread reflective ELF payload in memory with ptrace anti-debug evasion.",
+        },
+        {
+            "id": "ransomware_pe_dropper",
+            "name": "Windows High-Entropy PE Dropper & Shadow Purge",
+            "category": "Impact / Malware",
+            "default_port": 445,
+            "architecture": "PE32+",
+            "description": "Executes vssadmin shadow wipe, injects into svchost, and executes ChaCha20 encryption loops.",
+        },
+        {
+            "id": "syn_flood_dos",
+            "name": "TCP SYN Flood State Exhaustion Blast",
+            "category": "Network Denial of Service",
+            "default_port": 80,
+            "architecture": "Raw Socket",
+            "description": "Fires 200+ raw SYN frames/sec with spoofed source addresses to exhaust connection tables.",
+        },
+        {
+            "id": "hydra_ssh_brute",
+            "name": "Hydra Multi-Threaded OpenSSH Password Spray",
+            "category": "Credential Access",
+            "default_port": 22,
+            "architecture": "Protocol Handshake",
+            "description": "Executes 12 concurrent authentication threads with dictionary password guessing.",
+        },
+        {
+            "id": "heartbeat_sabotage",
+            "name": "Agent Process Sabotage & Telemetry Drop",
+            "category": "Defense Evasion",
+            "default_port": 8000,
+            "architecture": "Process Signal",
+            "description": "Issues SIGKILL to monitoring daemons to evaluate victim 15s Silence-as-Alarm detection logic.",
+        },
+    ]
+
 
 
 # ============================================================

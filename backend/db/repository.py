@@ -65,21 +65,51 @@ async def persist_telemetry_event(
 ) -> TelemetryEvent:
     """Persist a raw telemetry event dict and return the ORM row."""
     uid = event_uid or event.get("id") or _short_id()
+
+    # Safely convert threat score
+    try:
+        t_score = float(event.get("threat_score", event.get("score", 0.0)))
+    except (ValueError, TypeError):
+        t_score = 0.0
+
+    # Safely parse event timestamp (handles float epoch, int microsec, or ISO strings)
+    raw_ts = event.get("timestamp")
+    parsed_ts = None
+    if raw_ts is not None:
+        if isinstance(raw_ts, (int, float)):
+            parsed_ts = float(raw_ts)
+            # If timestamp in microseconds (> 1e14), convert to seconds
+            if parsed_ts > 1e14:
+                parsed_ts = parsed_ts / 1e6
+        elif isinstance(raw_ts, str):
+            try:
+                parsed_ts = float(raw_ts)
+                if parsed_ts > 1e14:
+                    parsed_ts = parsed_ts / 1e6
+            except ValueError:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+                    parsed_ts = dt.timestamp()
+                except Exception:
+                    parsed_ts = time.time()
+
     row = TelemetryEvent(
         event_uid=uid,
         agent_id=str(event.get("agent_id", event.get("agentId", "unknown"))),
         event_type=str(event.get("event_type", event.get("type", "unknown"))),
-        threat_score=float(event.get("threat_score", event.get("score", 0.0))),
+        threat_score=t_score,
         verdict=event.get("verdict"),
         process_name=event.get("process") or event.get("process_name"),
         pid=event.get("pid"),
         payload=event,
         received_at=time.time(),
-        event_timestamp=event.get("timestamp"),
+        event_timestamp=parsed_ts,
     )
     session.add(row)
     await session.flush()
     return row
+
 
 
 async def get_recent_telemetry(
