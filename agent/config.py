@@ -87,18 +87,48 @@ class AegisAgentConfig:
         """Loads configuration merging defaults, file settings, and environment overrides."""
         cfg = cls()
 
-        target_path = Path(config_path) if config_path else get_default_config_path()
+        # Resolve config file: explicit path -> platform default -> local agent.conf -> project agent.conf
+        resolved_path: Optional[Path] = None
+        if config_path and Path(config_path).exists():
+            resolved_path = Path(config_path)
+        elif not config_path:
+            for candidate in [
+                get_default_config_path(),
+                Path(__file__).resolve().parent / "agent.conf",
+                Path(__file__).resolve().parent.parent / "agent.conf",
+            ]:
+                if candidate.exists():
+                    resolved_path = candidate
+                    break
 
-        # Try loading from JSON/CONF file if present
-        if target_path.exists():
+        if resolved_path and resolved_path.exists():
             try:
-                with open(target_path, "r", encoding="utf-8") as f:
+                with open(resolved_path, "r", encoding="utf-8") as f:
                     file_data = json.load(f)
                     for k, v in file_data.items():
                         if hasattr(cfg, k):
                             setattr(cfg, k, v)
             except Exception as exc:
-                print(f"[AEGIS Config] Warning: Could not parse config file at {target_path}: {exc}")
+                print(f"[AEGIS Config] Warning: Could not parse config file at {resolved_path}: {exc}")
+
+        # Check local .env files if COMMAND_NODE_URL was not set in os.environ
+        if "COMMAND_NODE_URL" not in os.environ:
+            for env_candidate in [
+                Path(__file__).resolve().parent.parent / ".env",
+                Path(__file__).resolve().parent / ".env",
+            ]:
+                if env_candidate.exists():
+                    try:
+                        with open(env_candidate, "r", encoding="utf-8") as ef:
+                            for eline in ef:
+                                eline = eline.strip()
+                                if eline.startswith("COMMAND_NODE_URL="):
+                                    val = eline.split("=", 1)[1].strip().strip('"\'')
+                                    if val:
+                                        cfg.command_node_url = val
+                                        break
+                    except Exception:
+                        pass
 
         # Ensure directories exist if we have permissions
         try:

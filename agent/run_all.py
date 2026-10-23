@@ -127,10 +127,15 @@ parser.add_argument(
     help="Agent ID identifier for peer voting and telemetry (default: agent-host-local).",
 )
 parser.add_argument(
-    "--command-node", dest="command_node_url", default=os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000"),
-    help="URL of central command node (default: http://127.0.0.1:8000 or $COMMAND_NODE_URL).",
+    "--command-node", "--server", dest="command_node_url", default=None,
+    help="URL of central command node (default: COMMAND_NODE_URL or http://172.16.244.124:8000).",
 )
 args, _ = parser.parse_known_args()
+
+COMMAND_NODE_URL = (
+    args.command_node_url
+    or os.environ.get("COMMAND_NODE_URL", "http://172.16.244.124:8000")
+).rstrip("/")
 
 OS_NAME = resolve_os(args.os_override)
 COMPATIBLE_COLLECTORS = collectors_for_platform(OS_NAME)
@@ -139,6 +144,7 @@ PROFILE_NAME = OS_NAME.upper()
 engine = ThreatFusionEngine()
 print("[run_all] ThreatFusionEngine initialised. Check the [loader] lines above")
 print("[run_all] for 'Loaded X' vs 'Missing artefact' / 'Failed to load' per model.\n")
+print(f"[run_all] Streaming live telemetry to Main Server: {COMMAND_NODE_URL}/api/telemetry\n")
 
 # ---------------------------------------------------------------------------
 # JSONL output -- every scored event (from every model) is appended here,
@@ -290,11 +296,11 @@ def _post_event_async(event_payload: dict):
             import urllib.request
             cmd_url = getattr(args, 'command_node_url', os.environ.get('COMMAND_NODE_URL', 'http://127.0.0.1:8000')).rstrip('/')
             req = urllib.request.Request(
-                f"{cmd_url}/api/telemetry",
+                f"{COMMAND_NODE_URL}/api/telemetry",
                 data=json.dumps(event_payload, default=str).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
             )
-            urllib.request.urlopen(req, timeout=1.0)
+            urllib.request.urlopen(req, timeout=1.5)
         except Exception:
             pass
     threading.Thread(target=_send, daemon=True).start()

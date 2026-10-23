@@ -167,15 +167,16 @@ class LinuxTelemetryCollector:
             }
             try:
                 import json
+                import os
                 import urllib.request
 
-                cmd_base = os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000").rstrip("/")
+                cmd_url = os.environ.get("COMMAND_NODE_URL", "http://172.16.244.124:8000").rstrip("/")
                 req = urllib.request.Request(
-                    f"{cmd_base}/api/telemetry",
+                    f"{cmd_url}/api/telemetry",
                     data=json.dumps(event).encode("utf-8"),
                     headers={"Content-Type": "application/json"},
                 )
-                urllib.request.urlopen(req, timeout=1)
+                urllib.request.urlopen(req, timeout=1.5)
             except Exception:
                 pass
 

@@ -28,7 +28,7 @@ from agent.heartbeat import HeartbeatEmitter
 
 # ---------------------------------------------------------------------------
 AGENT_ID = os.getenv("AGENT_ID", "windows-agent-1")
-COMMAND_NODE_URL = os.getenv("COMMAND_NODE_URL", "http://127.0.0.1:8000").rstrip("/")
+COMMAND_NODE_URL = os.getenv("COMMAND_NODE_URL", "http://172.16.244.124:8000").rstrip("/")
 HEARTBEAT_INTERVAL = float(os.getenv("HEARTBEAT_INTERVAL", "5.0"))
 
 
