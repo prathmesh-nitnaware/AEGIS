@@ -979,22 +979,6 @@ class ThreatFusionEngine:
             is_loopback = str(ip).strip() in ("0.0.0.0", "127.0.0.1", "::1", "localhost")
             is_local = is_loopback or str(ip).startswith(("192.168.", "10.", "172.16."))
 
-            # Detect whether this event originated from a Linux environment
-            # (Linux collector sets event_id="PROC_CREATE", or host OS is not Windows,
-            # or process has Linux kernel worker / daemon naming patterns).
-            is_linux_event = (
-                str(event_id).upper() == "PROC_CREATE"
-                or not sys.platform.startswith("win")
-                or p_lower.startswith(("kworker/", "ksoftirqd/", "migration/", "rcu_"))
-                or (p_lower.startswith("(") and p_lower.endswith(")"))
-            )
-
-            # Check explicit OOV status against the Windows-trained process encoder
-            process_is_oov = (
-                self._zday_process_enc is not None
-                and p_str not in self._zday_process_enc.classes_
-            )
-
             # Allowlist / threshold calibration with Masquerading Protection:
             core_system_services = {
                 "svchost.exe", "services.exe", "lsass.exe", "smss.exe", "csrss.exe",
@@ -1037,6 +1021,21 @@ class ThreatFusionEngine:
                 is_linux_kthread
                 or p_lower in linux_core_services
                 or p_lower in linux_standard_utilities
+            )
+
+            # Detect whether this event originated from a Linux environment
+            # (Linux collector sets event_id="PROC_CREATE", or process is a Linux kernel thread / daemon).
+            # Note: Do not test sys.platform here so Linux-hosted command nodes & CI runners can score Windows events.
+            is_linux_event = (
+                str(event_id).upper() == "PROC_CREATE"
+                or is_linux_kthread
+                or (not p_lower.endswith(".exe") and is_linux_benign)
+            )
+
+            # Check explicit OOV status against the Windows-trained process encoder
+            process_is_oov = (
+                self._zday_process_enc is not None
+                and p_str not in self._zday_process_enc.classes_
             )
 
             if is_linux_event:
