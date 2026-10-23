@@ -122,6 +122,15 @@ class ActionConsumerDaemon:
             elif action_type == "LOG":
                 return self.driver.log_action("LOG", action)
 
+            elif action_type in ("SHUTDOWN_AGENT", "SHUTDOWN"):
+                logger.warning("[%s] Received %s directive from Command Node. Halting agent...", self.agent_id, action_type)
+                def _do_shutdown():
+                    time.sleep(0.8)
+                    self.stop()
+                    os._exit(0)
+                threading.Thread(target=_do_shutdown, daemon=True).start()
+                return {"status": "success", "message": "Agent shutdown initiated by Command Node"}
+
             else:
                 logger.warning("[%s] Unknown action type: %s", self.agent_id, action_type)
                 return {"status": "failed", "reason": f"Unknown action_type '{action_type}'"}

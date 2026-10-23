@@ -70,12 +70,23 @@ def _execute(action: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         "KILL_PROCESS",
         "QUARANTINE_FILE",
         "ISOLATE_HOST",
+        "SHUTDOWN_AGENT",
+        "SHUTDOWN",
     }
 
     if action_type not in supported_actions:
         return "DENIED", {
             "message": f"Unsupported action type: {action_type!r}"
         }
+
+    # Handle agent shutdown directive
+    if action_type in {"SHUTDOWN_AGENT", "SHUTDOWN"}:
+        import threading
+        def _terminate_agent():
+            time.sleep(1.0)
+            os._exit(0)
+        threading.Thread(target=_terminate_agent, daemon=True).start()
+        return "SUCCESS", {"message": "Agent cascade shutdown triggered by Command Node"}
 
     # 2. Host isolation remains disabled.
     if action_type == "ISOLATE_HOST":

@@ -64,6 +64,7 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s")
 
 SERVER_START_TIME = time.time()
+server_is_shutting_down = False
 
 # ============================================================
 # CENTRALIZED COMMAND NODE & REPOSITORY
@@ -158,7 +159,34 @@ async def lifespan(app: FastAPI):
     logger.info("[AEGIS API] Heartbeat ingestion: POST /api/heartbeat")
     yield
 
+    global server_is_shutting_down
+    server_is_shutting_down = True
     silence_detector.stop()
+    logger.info("[AEGIS API] Main server shutdown sequence initiated.")
+
+    # 1. Enqueue SHUTDOWN_AGENT actions for connected agents
+    try:
+        from backend.db.repository import enqueue_remote_action
+        async with get_session() as session:
+            for ag_id in list(agent_connection_metadata.keys()):
+                await enqueue_remote_action(
+                    session=session,
+                    agent_id=ag_id,
+                    action_type="SHUTDOWN_AGENT",
+                    parameters={"reason": "main_server_shutdown"},
+                )
+    except Exception as exc:
+        logger.debug("[AEGIS API] Failed to enqueue shutdown actions: %s", exc)
+
+    # 2. WebSocket broadcast to any connected dashboards/agents
+    try:
+        await broadcast({
+            "type": "server_shutdown",
+            "message": "Main server is shutting down",
+            "timestamp": time.time(),
+        })
+    except Exception:
+        pass
 
 
 app = FastAPI(
@@ -296,6 +324,14 @@ async def root():
 
 @app.get("/api/health")
 async def health():
+    if server_is_shutting_down:
+        return {
+            "status": "server_shutting_down",
+            "platform": platform.system(),
+            "uptime": round(time.time() - SERVER_START_TIME, 1),
+            "server_start_time": SERVER_START_TIME,
+            "timestamp": time.time(),
+        }
     uptime = time.time() - SERVER_START_TIME
     return {
         "status": "healthy",
@@ -305,6 +341,38 @@ async def health():
         "server_start_time": SERVER_START_TIME,
         "timestamp": time.time(),
     }
+
+
+@app.post("/api/server/shutdown-notify")
+async def server_shutdown_notify():
+    """
+    Called when Main Server shutdown is initiated (e.g. via run_all.py or management tooling).
+    Flags the server as shutting down so connected agent watchdogs shut down immediately.
+    """
+    global server_is_shutting_down
+    server_is_shutting_down = True
+    logger.info("[AEGIS API] Main Server shutdown-notify received. Signaling connected agents...")
+    try:
+        from backend.db.repository import enqueue_remote_action
+        async with get_session() as session:
+            for ag_id in list(agent_connection_metadata.keys()):
+                await enqueue_remote_action(
+                    session=session,
+                    agent_id=ag_id,
+                    action_type="SHUTDOWN_AGENT",
+                    parameters={"reason": "main_server_shutdown"},
+                )
+    except Exception as exc:
+        logger.debug("[AEGIS API] Failed to enqueue shutdown actions: %s", exc)
+    try:
+        await broadcast({
+            "type": "server_shutdown",
+            "message": "Main server is shutting down",
+            "timestamp": time.time(),
+        })
+    except Exception:
+        pass
+    return {"status": "ok", "message": "Server shutdown flagged"}
 
 
 # ============================================================

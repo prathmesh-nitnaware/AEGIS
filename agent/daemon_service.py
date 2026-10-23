@@ -40,6 +40,7 @@ from agent.config import AegisAgentConfig, get_default_config_path
 from agent.heartbeat import HeartbeatEmitter
 from agent.action_consumer import ActionConsumerDaemon
 from agent.p2p_mesh import P2PMeshNode
+from agent.server_monitor import ServerShutdownWatchdog
 
 
 def get_pid_file_path() -> Path:
@@ -65,6 +66,7 @@ class AegisAgentDaemon:
         self._p2p_node: Optional[P2PMeshNode] = None
         self._emitter: Optional[HeartbeatEmitter] = None
         self._action_consumer: Optional[ActionConsumerDaemon] = None
+        self._watchdog: Optional[ServerShutdownWatchdog] = None
         self._pid_file = get_pid_file_path()
 
     def _send_heartbeat_payload(self, payload: dict):
@@ -130,7 +132,19 @@ class AegisAgentDaemon:
             except Exception as exc:
                 print(f"[Daemon] Warning: Action consumer start failed: {exc}")
 
-        # 4. Main Event Loop
+        # 4. Start Server Shutdown Watchdog
+        try:
+            self._watchdog = ServerShutdownWatchdog(
+                command_node_url=self.config.command_node_url,
+                agent_id=self.config.agent_id,
+                on_server_shutdown=lambda reason: self.stop(),
+            )
+            self._watchdog.start()
+            print(f"[Daemon] ServerShutdownWatchdog active -> monitoring {self.config.command_node_url}/api/health")
+        except Exception as exc:
+            print(f"[Daemon] Warning: ServerShutdownWatchdog initialization failed: {exc}")
+
+        # 5. Main Event Loop
         try:
             while not self._stop_event.is_set():
                 time.sleep(0.5)
@@ -148,6 +162,13 @@ class AegisAgentDaemon:
         if self._action_consumer:
             try:
                 self._action_consumer.stop()
+            except Exception:
+                pass
+
+        # Stop server watchdog
+        if self._watchdog:
+            try:
+                self._watchdog.stop()
             except Exception:
                 pass
 

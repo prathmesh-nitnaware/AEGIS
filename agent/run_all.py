@@ -865,6 +865,26 @@ def main():
 
     agent_id = getattr(args, "agent_id", None) or os.environ.get("AGENT_ID", socket.gethostname())
     emitter = None
+    stop_agent_event = threading.Event()
+
+    # Cascade shutdown watchdog: monitors main server and terminates agent if server goes down
+    watchdog = None
+    try:
+        from server_monitor import ServerShutdownWatchdog
+
+        def _on_server_shutdown(reason: str):
+            print(f"\n[run_all] Main server shutdown cascade ({reason}). Stopping agent...\n", flush=True)
+            stop_agent_event.set()
+
+        watchdog = ServerShutdownWatchdog(
+            command_node_url=COMMAND_NODE_URL,
+            agent_id=agent_id,
+            on_server_shutdown=_on_server_shutdown,
+        )
+        watchdog.start()
+        print(f"[run_all] ServerShutdownWatchdog active -> monitoring {COMMAND_NODE_URL}/api/health")
+    except Exception as exc:
+        print(f"[run_all] Warning: Could not start ServerShutdownWatchdog: {exc}")
 
     # Start Heartbeat Emitter for silence-as-alarm monitoring
     if not getattr(args, "no_heartbeat", False):
@@ -920,32 +940,40 @@ def main():
     results = run_collectors(OS_NAME, START_FNS)
 
     # ===========================================================================
-    # Keep running
+    # Keep running until user interrupt or server shutdown cascade
     # ===========================================================================
 
     print("\n[run_all] All available collectors started. Press Ctrl+C to stop.\n")
     try:
-        while True:
-            time.sleep(1)
+        while not stop_agent_event.is_set():
+            stop_agent_event.wait(timeout=0.5)
     except KeyboardInterrupt:
-        print("\n[run_all] Stopping...")
+        print("\n[run_all] Stopping by user interrupt...")
+    finally:
+        if watchdog:
+            try:
+                watchdog.stop()
+            except Exception:
+                pass
+
         if emitter:
             try:
                 emitter.stop()
-                # Send graceful departure beacon to Command Node so silence alarms are suppressed
-                shutdown_payload = {
-                    "agent_id": agent_id,
-                    "status": "OFFLINE_GRACEFUL",
-                    "reason": "USER_KEYBOARD_INTERRUPT",
-                    "timestamp": time.time(),
-                }
-                req = urllib.request.Request(
-                    f"{COMMAND_NODE_URL}/api/heartbeat/shutdown",
-                    data=json.dumps(shutdown_payload).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
-                )
-                urllib.request.urlopen(req, timeout=2.0)
-                print(f"[run_all] Graceful shutdown beacon sent for '{agent_id}'.")
+                if not stop_agent_event.is_set():
+                    # Send graceful departure beacon to Command Node so silence alarms are suppressed
+                    shutdown_payload = {
+                        "agent_id": agent_id,
+                        "status": "OFFLINE_GRACEFUL",
+                        "reason": "USER_KEYBOARD_INTERRUPT",
+                        "timestamp": time.time(),
+                    }
+                    req = urllib.request.Request(
+                        f"{COMMAND_NODE_URL}/api/heartbeat/shutdown",
+                        data=json.dumps(shutdown_payload).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    urllib.request.urlopen(req, timeout=2.0)
+                    print(f"[run_all] Graceful shutdown beacon sent for '{agent_id}'.")
             except Exception:
                 pass
 
@@ -962,6 +990,16 @@ def main():
                     stop()
                 except Exception:
                     pass
+
+        if _p2p_node:
+            try:
+                _p2p_node.stop()
+            except Exception:
+                pass
+
+        print("[run_all] Agent shut down cleanly.")
+        if stop_agent_event.is_set():
+            os._exit(0)
 
 
 if __name__ == "__main__":

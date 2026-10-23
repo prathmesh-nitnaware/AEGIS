@@ -21,6 +21,7 @@ Dependencies:
 import os
 import signal
 import sys
+import threading
 import time
 import requests
 
@@ -131,19 +132,40 @@ def main():
     )
     consumer.start()
 
+    from agent.server_monitor import ServerShutdownWatchdog
+    stop_event = threading.Event()
+
+    def _on_shutdown(reason: str):
+        print(f"\n[{AGENT_ID}] Server shutdown cascade ({reason}). Stopping heartbeat runner...")
+        stop_event.set()
+
+    watchdog = ServerShutdownWatchdog(
+        command_node_url=COMMAND_NODE_URL,
+        agent_id=AGENT_ID,
+        on_server_shutdown=_on_shutdown,
+    )
+    watchdog.start()
+
     print(f"[{AGENT_ID}] Heartbeat runner started -> {COMMAND_NODE_URL}/api/heartbeat")
     print(f"[{AGENT_ID}] Autonomous Action Consumer active -> {COMMAND_NODE_URL}/api/agents/{AGENT_ID}/actions/pending")
+    print(f"[{AGENT_ID}] ServerShutdownWatchdog active -> {COMMAND_NODE_URL}/api/health")
     print(f"[{AGENT_ID}] Note: A clean Ctrl+C or OS shutdown sends a graceful departure beacon.")
     print(f"[{AGENT_ID}]       A forceful kill (kill -9 or taskkill /F) simulates adversary tampering.")
 
     try:
-        while True:
-            time.sleep(1)
+        while not stop_event.is_set():
+            stop_event.wait(timeout=0.5)
     except KeyboardInterrupt:
         print(f"\n[{AGENT_ID}] Keyboard interrupt received...")
+    finally:
+        watchdog.stop()
         emitter.stop()
         consumer.stop()
-        send_shutdown_beacon("user_keyboard_interrupt")
+        if not stop_event.is_set():
+            send_shutdown_beacon("user_keyboard_interrupt")
+        print(f"[{AGENT_ID}] Heartbeat runner stopped cleanly.")
+        if stop_event.is_set():
+            os._exit(0)
 
 
 if __name__ == "__main__":

@@ -303,6 +303,19 @@ def main() -> None:
 
     except KeyboardInterrupt:
         print("\n[*] Stopping all AEGIS services...")
+        try:
+            # Signal connected agents that Main Server is shutting down
+            import urllib.request
+            req = urllib.request.Request(
+                f"{command_url}/api/server/shutdown-notify",
+                data=b"{}",
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=1.0)
+            time.sleep(0.5)
+        except Exception:
+            pass
     finally:
         for p in processes:
             try:

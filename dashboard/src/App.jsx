@@ -28,8 +28,6 @@ import {
   Zap,
   Radio,
   Skull,
-  Swords,
-  Sliders,
   Award,
   Globe,
   Lock,
@@ -56,12 +54,8 @@ import ReportModal from "./ReportModal";
 import XAIExplanationModal from "./XAIExplanationModal";
 import BenchmarkTab from "./BenchmarkTab";
 import PcapReplayerTab from "./PcapReplayerTab";
-import BattleArenaTab from "./BattleArenaTab";
 import KernelCollectorsTab from "./KernelCollectorsTab";
-import FleetManagementTab from "./FleetManagementTab";
 import ComplianceAuditTab from "./ComplianceAuditTab";
-import RulesEngineTab from "./RulesEngineTab";
-import HardwareProfilingTab from "./HardwareProfilingTab";
 import CopilotAdvisorTab from "./CopilotAdvisorTab";
 import ThreatIntelTab from "./ThreatIntelTab";
 import RbacAuthTab from "./RbacAuthTab";
@@ -884,43 +878,11 @@ export default function App() {
           <div className="nav-section" style={{ marginTop: 14 }}>ENTERPRISE &amp; WARFARE</div>
 
           <button
-            className={`nav-item ${activeTab === "battle" ? "active" : ""}`}
-            onClick={() => setActiveTab("battle")}
-          >
-            <Swords size={16} />
-            Live Battle Arena
-          </button>
-
-          <button
             className={`nav-item ${activeTab === "kernel" ? "active" : ""}`}
             onClick={() => setActiveTab("kernel")}
           >
             <Cpu size={16} />
             Kernel eBPF &amp; ETW
-          </button>
-
-          <button
-            className={`nav-item ${activeTab === "fleet_mgmt" ? "active" : ""}`}
-            onClick={() => setActiveTab("fleet_mgmt")}
-          >
-            <Sliders size={16} />
-            Fleet &amp; Hot-Update
-          </button>
-
-          <button
-            className={`nav-item ${activeTab === "rules_engine" ? "active" : ""}`}
-            onClick={() => setActiveTab("rules_engine")}
-          >
-            <Shield size={16} />
-            Sigma &amp; YARA Rules
-          </button>
-
-          <button
-            className={`nav-item ${activeTab === "hardware_profiling" ? "active" : ""}`}
-            onClick={() => setActiveTab("hardware_profiling")}
-          >
-            <Activity size={16} />
-            Hardware &amp; Flamegraph
           </button>
 
           <button
@@ -2762,13 +2724,6 @@ export default function App() {
           </section>
         )}
 
-        {/* TAB: LIVE RED VS BLUE BATTLE ARENA */}
-        {activeTab === "battle" && (
-          <section className="content-grid" style={{ display: "block" }}>
-            <BattleArenaTab />
-          </section>
-        )}
-
         {/* TAB: KERNEL eBPF & ETW TELEMETRY */}
         {activeTab === "kernel" && (
           <section className="content-grid" style={{ display: "block" }}>
@@ -2776,31 +2731,10 @@ export default function App() {
           </section>
         )}
 
-        {/* TAB: FLEET MANAGEMENT & HOT-UPDATE */}
-        {activeTab === "fleet_mgmt" && (
-          <section className="content-grid" style={{ display: "block" }}>
-            <FleetManagementTab />
-          </section>
-        )}
-
         {/* TAB: COMPLIANCE & AUDIT REPORTING */}
         {activeTab === "compliance_tab" && (
           <section className="content-grid" style={{ display: "block" }}>
             <ComplianceAuditTab />
-          </section>
-        )}
-
-        {/* TAB: SIGMA & YARA RULES ENGINE */}
-        {activeTab === "rules_engine" && (
-          <section className="content-grid" style={{ display: "block" }}>
-            <RulesEngineTab />
-          </section>
-        )}
-
-        {/* TAB: HARDWARE PROFILING & FLAMEGRAPH */}
-        {activeTab === "hardware_profiling" && (
-          <section className="content-grid" style={{ display: "block" }}>
-            <HardwareProfilingTab />
           </section>
         )}
 
