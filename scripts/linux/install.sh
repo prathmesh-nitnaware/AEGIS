@@ -18,7 +18,8 @@ LOG_DIR="/var/log/aegis"
 QUARANTINE_DIR="/var/lib/aegis/quarantine"
 SERVICE_FILE="/etc/systemd/system/aegis-agent.service"
 
-COMMAND_NODE_URL="http://127.0.0.1:8000"
+COMMAND_NODE_URL="${COMMAND_NODE_URL:-${MAIN_SERVER_IP:+http://${MAIN_SERVER_IP}:8000}}"
+COMMAND_NODE_URL="${COMMAND_NODE_URL:-http://127.0.0.1:8000}"
 AGENT_ID=$(hostname)
 NON_INTERACTIVE=false
 

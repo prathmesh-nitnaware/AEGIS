@@ -65,6 +65,35 @@ _PROJECT_ROOT = _HERE.parent                      # .../AEGIS/
 sys.path.insert(0, str(_HERE))
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+
+def load_env_file(path: Path) -> None:
+    """Safely loads an environment file into os.environ without overriding existing env vars."""
+    if not path.is_file():
+        return
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(path, override=False)
+        return
+    except ImportError:
+        pass
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k not in os.environ:
+                os.environ[k] = v
+    except Exception:
+        pass
+
+
+# Load local agent/.env and root .env before reading configs
+load_env_file(_HERE / ".env")
+load_env_file(_PROJECT_ROOT / ".env")
+
 from fusion_engine import ThreatFusionEngine  # noqa: E402
 from live_collectors import (  # noqa: E402
     ZeroDayEventCollector,
@@ -123,14 +152,94 @@ parser.add_argument(
     help="Comma-separated list of peer addresses for P2P mesh (e.g. 192.168.0.105:9001).",
 )
 parser.add_argument(
-    "--agent-id", dest="agent_id", default="agent-host-local",
-    help="Agent ID identifier for peer voting and telemetry (default: agent-host-local).",
+    "--agent-id", dest="agent_id", default=os.environ.get("AGENT_ID", socket.gethostname()),
+    help="Agent ID identifier for peer voting, heartbeats, and telemetry (default: hostname).",
 )
 parser.add_argument(
-    "--command-node", dest="command_node_url", default=os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000"),
-    help="URL of central command node (default: http://127.0.0.1:8000 or $COMMAND_NODE_URL).",
+    "--no-heartbeat", dest="no_heartbeat", action="store_true", default=False,
+    help="Disable automatic background heartbeat pulse emitter.",
+)
+parser.add_argument(
+    "--command-node", "--server", dest="command_node_url", default=None,
+    help="URL of central command node (default: COMMAND_NODE_URL or http://127.0.0.1:8000).",
+)
+parser.add_argument(
+    "--no-ip-prompt", dest="no_ip_prompt", action="store_true", default=False,
+    help="Skip interactive Main Server IP prompt and use default/environment immediately.",
 )
 args, _ = parser.parse_known_args()
+
+
+def clean_server_url(raw_input: str) -> str:
+    """Normalize user input to a fully qualified http://<ip>:<port> URL."""
+    val = raw_input.strip()
+    if not val:
+        return "http://127.0.0.1:8000"
+    if not val.startswith("http://") and not val.startswith("https://"):
+        val = f"http://{val}"
+    parsed = urllib.parse.urlsplit(val)
+    port = parsed.port or 8000
+    host = parsed.hostname or "127.0.0.1"
+    return f"{parsed.scheme}://{host}:{port}"
+
+
+def test_server_connectivity(server_url: str) -> bool:
+    """Test reachability to the central Command Node API health endpoint."""
+    print(f"[*] Verifying connectivity to Main Server at {server_url}/api/health ...")
+    try:
+        req = urllib.request.Request(f"{server_url}/api/health", headers={"User-Agent": "AEGIS-Agent"})
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            if resp.status == 200:
+                print(f"  [OK] Successfully connected to Main Server at {server_url} (HTTP 200)!\n")
+                return True
+    except Exception as exc:
+        print(f"  [!] Note: Cannot immediately connect to {server_url}/api/health ({exc}).")
+        print("      Telemetry and heartbeats will start and retry connecting in the background.\n")
+    return False
+
+
+def save_agent_server_url(server_url: str) -> None:
+    """Persist configured server URL into local agent/.env (gitignored)."""
+    try:
+        env_file = _HERE / ".env"
+        existing = env_file.read_text(encoding="utf-8") if env_file.exists() else ""
+        lines = [
+            l for l in existing.splitlines()
+            if not any(l.startswith(k) for k in ("COMMAND_NODE_URL=", "MAIN_SERVER_IP="))
+        ]
+        parsed = urllib.parse.urlsplit(server_url)
+        ip = parsed.hostname or "127.0.0.1"
+        lines.extend([
+            f"MAIN_SERVER_IP={ip}",
+            f"COMMAND_NODE_URL={server_url}",
+        ])
+        env_file.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+        print(f"[*] Saved configured server to agent/.env (gitignored)")
+    except Exception:
+        pass
+
+
+default_target = (
+    args.command_node_url
+    or os.environ.get("COMMAND_NODE_URL")
+    or (f"http://{os.environ.get('MAIN_SERVER_IP')}:8000" if os.environ.get("MAIN_SERVER_IP") else None)
+    or "http://127.0.0.1:8000"
+)
+
+COMMAND_NODE_URL = clean_server_url(default_target)
+
+print("\n" + "=" * 80)
+print("      AEGIS ENDPOINT AGENT — OS-AWARE TELEMETRY & THREAT DEFENSE")
+print("=" * 80)
+print(f"  Target Main Server:  {COMMAND_NODE_URL}")
+print("  This agent will stream live ML telemetry, verdicts, and heartbeats to this server.")
+print("-" * 80)
+
+if args.command_node_url:
+    save_agent_server_url(COMMAND_NODE_URL)
+
+test_server_connectivity(COMMAND_NODE_URL)
+os.environ["COMMAND_NODE_URL"] = COMMAND_NODE_URL
 
 OS_NAME = resolve_os(args.os_override)
 COMPATIBLE_COLLECTORS = collectors_for_platform(OS_NAME)
@@ -139,6 +248,7 @@ PROFILE_NAME = OS_NAME.upper()
 engine = ThreatFusionEngine()
 print("[run_all] ThreatFusionEngine initialised. Check the [loader] lines above")
 print("[run_all] for 'Loaded X' vs 'Missing artefact' / 'Failed to load' per model.\n")
+print(f"[run_all] Streaming live telemetry to Main Server: {COMMAND_NODE_URL}/api/telemetry\n")
 
 # Start the response-action polling worker in simulation mode by default.
 try:
@@ -303,25 +413,42 @@ def _trigger_peer_voting_async(model: str, score: float, verdict: str, extra: di
     threading.Thread(target=_dispatch_vote, daemon=True).start()
 
 
-def _post_event_async(event_payload: dict):
+_last_telemetry_error_time = 0.0
+_telemetry_delivered_count = 0
+
+
+def _post_event_async(event_payload: dict) -> None:
     def _send():
+        global _last_telemetry_error_time, _telemetry_delivered_count
+        target_url = (
+            getattr(args, 'command_node_url', None)
+            or os.environ.get('COMMAND_NODE_URL')
+            or COMMAND_NODE_URL
+        ).rstrip('/')
         try:
             import urllib.request
-            cmd_url = getattr(args, 'command_node_url', os.environ.get('COMMAND_NODE_URL', 'http://127.0.0.1:8000')).rstrip('/')
             req = urllib.request.Request(
-                f"{cmd_url}/api/telemetry",
+                f"{target_url}/api/telemetry",
                 data=json.dumps(event_payload, default=str).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
             )
-            urllib.request.urlopen(req, timeout=1.0)
-        except Exception:
-            pass
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                if resp.status in (200, 201):
+                    _telemetry_delivered_count += 1
+                    if _telemetry_delivered_count in (1, 5, 10, 25, 50, 100):
+                        print(f"  [+] Shipped telemetry event #{_telemetry_delivered_count} ({event_payload.get('model')}) to Main Server ({target_url})")
+        except Exception as exc:
+            now = time.time()
+            if now - _last_telemetry_error_time > 10.0:
+                _last_telemetry_error_time = now
+                print(f"  [!] Telemetry delivery to {target_url}/api/telemetry failed: {exc}")
     threading.Thread(target=_send, daemon=True).start()
 
 
 def save_event(model: str, score: Optional[float], verdict: str, **extra):
     """Append one scored event as a JSON line to telemetry_scores.jsonl and POST to backend API."""
     ts = datetime.now(timezone.utc).isoformat()
+    current_agent_id = getattr(args, "agent_id", None) or os.environ.get("AGENT_ID", socket.gethostname())
 
     # Analytical precision: store exact float or None without destructive rounding
     raw_score = float(score) if score is not None else None
@@ -340,6 +467,7 @@ def save_event(model: str, score: Optional[float], verdict: str, **extra):
 
     event = {
         "timestamp": ts,
+        "agent_id": current_agent_id,
         "model": model,
         "score": raw_score,
         "score_status": score_status,
@@ -355,15 +483,20 @@ def save_event(model: str, score: Optional[float], verdict: str, **extra):
     # Distinguish None from 0.0: do NOT coerce None to 0.0
     threat_score = raw_score
     norm_prob = (1.0 - threat_score) if threat_score is not None else None
+    proc_name = extra.get("process_name", extra.get("process", extra.get("file_path", model)))
     api_payload = {
         "timestamp": ts,
+        "agent_id": current_agent_id,
         "model": model,
+        "event_type": model,
         "threat_score": threat_score,
         "score_status": score_status,
         "predicted_class": verdict,
+        "verdict": verdict,
         "pid": extra.get("pid", 0),
         "uid": extra.get("uid", 0),
-        "process": extra.get("process_name", extra.get("process", extra.get("file_path", model))),
+        "process": proc_name,
+        "process_name": proc_name,
         "normal_probability": norm_prob,
         "probabilities": {
             "Normal": norm_prob,
@@ -731,6 +864,36 @@ def start_linux_ids() -> None:
 def main():
     print_banner(OS_NAME, PROFILE_NAME, COMPATIBLE_COLLECTORS)
 
+    agent_id = getattr(args, "agent_id", None) or os.environ.get("AGENT_ID", socket.gethostname())
+    emitter = None
+
+    # Start Heartbeat Emitter for silence-as-alarm monitoring
+    if not getattr(args, "no_heartbeat", False):
+        try:
+            from heartbeat import HeartbeatEmitter
+
+            def _send_heartbeat(payload: dict) -> None:
+                try:
+                    data = json.dumps(payload).encode("utf-8")
+                    req = urllib.request.Request(
+                        f"{COMMAND_NODE_URL}/api/heartbeat",
+                        data=data,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    urllib.request.urlopen(req, timeout=2.0)
+                except Exception:
+                    pass
+
+            emitter = HeartbeatEmitter(
+                agent_id=agent_id,
+                interval=float(os.environ.get("HEARTBEAT_INTERVAL", "5.0")),
+                send_fn=_send_heartbeat,
+            )
+            emitter.start()
+            print(f"[run_all] HeartbeatEmitter active for '{agent_id}' -> {COMMAND_NODE_URL}/api/heartbeat")
+        except Exception as exc:
+            print(f"[run_all] Warning: Could not start HeartbeatEmitter: {exc}")
+
     START_FNS = {
         "zero_day": start_zero_day,
         "cicids": start_cicids,
@@ -753,6 +916,26 @@ def main():
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n[run_all] Stopping...")
+        if emitter:
+            try:
+                emitter.stop()
+                # Send graceful departure beacon to Command Node so silence alarms are suppressed
+                shutdown_payload = {
+                    "agent_id": agent_id,
+                    "status": "OFFLINE_GRACEFUL",
+                    "reason": "USER_KEYBOARD_INTERRUPT",
+                    "timestamp": time.time(),
+                }
+                req = urllib.request.Request(
+                    f"{COMMAND_NODE_URL}/api/heartbeat/shutdown",
+                    data=json.dumps(shutdown_payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                )
+                urllib.request.urlopen(req, timeout=2.0)
+                print(f"[run_all] Graceful shutdown beacon sent for '{agent_id}'.")
+            except Exception:
+                pass
+
         for name, handle in _running_handles.items():
             stop = getattr(handle, "stop", None)
             if callable(stop):

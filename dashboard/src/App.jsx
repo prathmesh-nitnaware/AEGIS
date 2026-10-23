@@ -15,6 +15,7 @@ import {
   FileText,
   Filter,
   Gauge,
+  Network,
   RefreshCw,
   Server,
   Shield,
@@ -34,6 +35,8 @@ import {
   Lock,
   Key,
   UserCheck,
+  ArrowRight,
+  ArrowLeft,
 } from "lucide-react";
 import {
   AreaChart,
@@ -60,7 +63,16 @@ import HardwareProfilingTab from "./HardwareProfilingTab";
 import CopilotAdvisorTab from "./CopilotAdvisorTab";
 import ThreatIntelTab from "./ThreatIntelTab";
 import RbacAuthTab from "./RbacAuthTab";
+import LivePeerVotingVisualization from "./LivePeerVotingVisualization";
 
+
+const API_BASE = typeof window !== "undefined"
+  ? `${window.location.protocol}//${window.location.hostname || "127.0.0.1"}:8000`
+  : "http://127.0.0.1:8000";
+
+const WS_BASE = typeof window !== "undefined"
+  ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname || "127.0.0.1"}:8000`
+  : "ws://127.0.0.1:8000";
 
 /* ═══════════════════════════════════════════════
    Comprehensive Syscall Mapping Dictionary
@@ -191,6 +203,9 @@ export default function App() {
 
   // New Phase D States (NeonDB, Trust Feedback, Maintenance, Silence Alarms, Audit)
   const [verdicts, setVerdicts] = useState([]);
+  const [telemetryRecords, setTelemetryRecords] = useState([]);
+  const [isTelemetryLoading, setIsTelemetryLoading] = useState(false);
+  const [selectedTelemetryForVoting, setSelectedTelemetryForVoting] = useState(null);
   const [maintenanceWindows, setMaintenanceWindows] = useState([]);
   const [silenceAlarms, setSilenceAlarms] = useState([]);
   const [agentTrustMap, setAgentTrustMap] = useState({});
@@ -218,7 +233,7 @@ export default function App() {
 
   const fetchVerdicts = useCallback(async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/centralized/verdicts?limit=50");
+      const res = await fetch(`${API_BASE}/api/centralized/verdicts?limit=50`);
       const data = await res.json();
       if (data && data.verdicts) setVerdicts(data.verdicts);
     } catch (e) {
@@ -226,9 +241,24 @@ export default function App() {
     }
   }, []);
 
+  const fetchTelemetry = useCallback(async () => {
+    setIsTelemetryLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/centralized/telemetry?limit=50`);
+      const data = await res.json();
+      if (data && Array.isArray(data.telemetries)) {
+        setTelemetryRecords(data.telemetries);
+      }
+    } catch (e) {
+      console.error("Failed to fetch telemetry:", e);
+    } finally {
+      setIsTelemetryLoading(false);
+    }
+  }, []);
+
   const fetchMaintenance = useCallback(async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/maintenance/windows?active_only=false");
+      const res = await fetch(`${API_BASE}/api/maintenance/windows?active_only=false`);
       const data = await res.json();
       if (data && data.windows) setMaintenanceWindows(data.windows);
     } catch (e) {
@@ -238,7 +268,7 @@ export default function App() {
 
   const fetchSilenceAlarms = useCallback(async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/alerts");
+      const res = await fetch(`${API_BASE}/api/alerts`);
       const data = await res.json();
       if (data && data.alerts) setSilenceAlarms(data.alerts);
     } catch (e) {
@@ -248,7 +278,7 @@ export default function App() {
 
   const fetchAgentTrust = useCallback(async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/agents/trust/all");
+      const res = await fetch(`${API_BASE}/api/agents/trust/all`);
       const data = await res.json();
       if (data && data.agents) setAgentTrustMap(data.agents);
     } catch (e) {
@@ -258,7 +288,7 @@ export default function App() {
 
   const fetchAudit = useCallback(async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/audit?limit=50");
+      const res = await fetch(`${API_BASE}/api/audit?limit=50`);
       const data = await res.json();
       if (data && data.entries) setAuditLogs(data.entries);
     } catch (e) {
@@ -275,6 +305,10 @@ export default function App() {
 
   // Tab switch fetcher
   useEffect(() => {
+    if (activeTab === "peer_voting") {
+      fetchTelemetry();
+      fetchVerdicts();
+    }
     if (activeTab === "verdicts") fetchVerdicts();
     if (activeTab === "maintenance") fetchMaintenance();
     if (activeTab === "agents") {
@@ -282,11 +316,11 @@ export default function App() {
       fetchSilenceAlarms();
     }
     if (activeTab === "audit") fetchAudit();
-  }, [activeTab, fetchVerdicts, fetchMaintenance, fetchAgentTrust, fetchSilenceAlarms, fetchAudit]);
+  }, [activeTab, fetchTelemetry, fetchVerdicts, fetchMaintenance, fetchAgentTrust, fetchSilenceAlarms, fetchAudit]);
 
   const handleTrustFeedback = async (voteId, confirmed) => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/trust/feedback", {
+      const res = await fetch(`${API_BASE}/api/trust/feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -319,7 +353,7 @@ export default function App() {
 
   const handleAcknowledgeAlarm = async (alarmId) => {
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/alerts/${alarmId}/ack`, {
+      const res = await fetch(`${API_BASE}/api/alerts/${alarmId}/ack`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ acknowledged_by: "SecOps Admin" }),
@@ -336,7 +370,7 @@ export default function App() {
   const handleScheduleMaintenance = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/maintenance/schedule", {
+      const res = await fetch(`${API_BASE}/api/maintenance/schedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -360,7 +394,7 @@ export default function App() {
 
   const handleCancelMaintenance = async (windowId) => {
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/maintenance/cancel?window_id=${windowId}`, {
+      const res = await fetch(`${API_BASE}/api/maintenance/cancel?window_id=${windowId}`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -378,7 +412,7 @@ export default function App() {
     const id1 = setInterval(() => setClock(new Date()), 1000);
     const fetchHealth = async () => {
       try {
-        const res = await fetch("http://127.0.0.1:8000/api/health");
+        const res = await fetch(`${API_BASE}/api/health`);
         const data = await res.json();
         if (data.uptime !== undefined) setServerUptime(Math.floor(data.uptime));
         if (data.platform) setHostOS(data.platform);
@@ -397,7 +431,7 @@ export default function App() {
   /* Trigger test telemetry event */
   const sendTestPulse = async () => {
     try {
-      await fetch("http://127.0.0.1:8000/api/telemetry/test", { method: "POST" });
+      await fetch(`${API_BASE}/api/telemetry/test`, { method: "POST" });
     } catch (err) {
       console.error("Test pulse error:", err);
     }
@@ -412,7 +446,7 @@ export default function App() {
     const connect = () => {
       if (stopped) return;
       setWsStatus("CONNECTING");
-      ws = new WebSocket("ws://127.0.0.1:8000/ws/telemetry");
+      ws = new WebSocket(`${WS_BASE}/ws/telemetry`);
 
       ws.onopen = () => setWsStatus("LIVE");
 
@@ -506,12 +540,14 @@ export default function App() {
 
           const procName = event.process || event.process_name || (event.file_path ? event.file_path.split(/[\/\\]/).pop() : null) || event.model || "unknown";
           const modelTag = (event.model || "event").toUpperCase();
+          const agentIdTag = event.agent_id || event.agentId || "local-node";
 
           // Update active processes/events table
           setProcesses((prev) => {
             const updated = [
               {
                 process: procName,
+                agent_id: agentIdTag,
                 model: modelTag,
                 pid: event.pid || 0,
                 uid: event.uid || 0,
@@ -535,8 +571,9 @@ export default function App() {
                 id: `${event.timestamp}-${event.pid || Math.random()}`,
                 severity: threatScore >= 0.6 ? "critical" : "warning",
                 process: procName,
+                agent_id: agentIdTag,
                 pid: event.pid || 0,
-                message: `[${modelTag}] Anomaly on ${procName} — ${
+                message: `[${modelTag}] (${agentIdTag}) Anomaly on ${procName} — ${
                   event.predicted_class || event.verdict || "MEDIUM"
                 } (${(threatScore * 100).toFixed(1)}% threat score)`,
                 time: timeStr,
@@ -568,7 +605,7 @@ export default function App() {
 
   /* Fetch initial latest state from backend */
   useEffect(() => {
-    fetch("http://127.0.0.1:8000/api/telemetry/latest")
+    fetch(`${API_BASE}/api/telemetry/latest`)
       .then((res) => res.json())
       .then((event) => {
         if (event && (typeof event.threat_score === "number" || typeof event.score === "number") && event.timestamp) {
@@ -588,7 +625,7 @@ export default function App() {
 
   /* Fetch initial agent heartbeat snapshot */
   useEffect(() => {
-    fetch("http://127.0.0.1:8000/api/agents")
+    fetch(`${API_BASE}/api/agents`)
       .then((res) => res.json())
       .then((data) => {
         const map = {};
@@ -663,6 +700,15 @@ export default function App() {
             <Database size={16} />
             Consensus & Feedback
             {verdicts.length > 0 && <span className="nav-badge">{verdicts.length}</span>}
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === "peer_voting" ? "active" : ""}`}
+            onClick={() => setActiveTab("peer_voting")}
+          >
+            <Network size={16} />
+            Live Peer Voting
+            <span className="nav-badge" style={{ background: "rgba(56, 189, 248, 0.2)", color: "#38bdf8" }}>MESH</span>
           </button>
 
           <button
@@ -1153,9 +1199,10 @@ export default function App() {
                   <thead>
                     <tr>
                       <th>Process Name</th>
+                      <th>Origin Node</th>
                       <th>PID</th>
                       <th>UID</th>
-                      <th>Last Syscall</th>
+                      <th>Last Syscall / Port</th>
                       <th>Threat Score</th>
                       <th>Prediction</th>
                       <th>Actions</th>
@@ -1163,12 +1210,17 @@ export default function App() {
                   </thead>
                   <tbody>
                     {processes.map((p) => (
-                      <tr key={p.pid} className={p.threat_score >= 0.35 ? "highlight-row" : ""}>
+                      <tr key={`${p.pid}-${p.process}`} className={p.threat_score >= 0.35 ? "highlight-row" : ""}>
                         <td>
                           <div className="process-cell">
                             <Terminal size={15} className="process-icon" />
                             <strong>{p.process}</strong>
                           </div>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: "11px", background: "rgba(56, 189, 248, 0.12)", color: "#38bdf8", padding: "2px 7px", borderRadius: "4px", border: "1px solid rgba(56, 189, 248, 0.3)", fontWeight: 600 }}>
+                            {p.agent_id || "node"}
+                          </span>
                         </td>
                         <td><code>{p.pid}</code></td>
                         <td><code>{p.uid}</code></td>
@@ -1490,6 +1542,278 @@ export default function App() {
                   <span>Verdicts from peer voting nodes will appear here in real time.</span>
                 </div>
               )}
+            </div>
+          </section>
+        )}
+
+        {/* ═══ TAB: LIVE PEER VOTING & TELEMETRY TABLE ═══ */}
+        {activeTab === "peer_voting" && (
+          <section className="content-grid" style={{ display: "block" }}>
+            <LivePeerVotingVisualization
+              liveVerdicts={verdicts}
+              selectedTelemetry={selectedTelemetryForVoting}
+              onBack={selectedTelemetryForVoting ? () => setSelectedTelemetryForVoting(null) : null}
+            />
+
+            <div className="panel full-width" style={{ marginTop: 20 }}>
+              <div className="panel-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <h3 className="panel-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Network size={18} style={{ color: "#38bdf8" }} />
+                    Live Peer Voting Telemetry Feed
+                  </h3>
+                  <p className="panel-subtitle">
+                    Active endpoint telemetry records and P2P Byzantine consensus verdicts. Click any telemetry row to view its distributed peer-voting correlation above.
+                  </p>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <button
+                    className="btn-badge-chip"
+                    onClick={() => {
+                      fetchTelemetry();
+                      fetchVerdicts();
+                    }}
+                    disabled={isTelemetryLoading}
+                    title="Refresh telemetry and verdict records"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                  >
+                    <RefreshCw size={13} className={isTelemetryLoading ? "spin-icon" : ""} />
+                    {isTelemetryLoading ? "Refreshing..." : "Refresh"}
+                  </button>
+                  {selectedTelemetryForVoting && (
+                    <button
+                      className="btn-badge-chip"
+                      onClick={() => setSelectedTelemetryForVoting(null)}
+                      style={{ color: "#38bdf8", borderColor: "rgba(56, 189, 248, 0.4)" }}
+                      title="Reset visualization to general peer topology"
+                    >
+                      Reset to General Topology
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="table-wrapper" style={{ marginTop: 14 }}>
+                {(() => {
+                  // Combine backend telemetry records with live processes and verdicts
+                  const combinedRows = [];
+                  const seenKeys = new Set();
+
+                  // 1. Backend stored/live telemetries
+                  telemetryRecords.forEach((item) => {
+                    const payload = item.payload || {};
+                    const pid = payload.pid ?? item.pid ?? (typeof payload.process_id === "number" ? payload.process_id : null);
+                    const tName = item.event_type || payload.process || payload.process_name || payload.model || "System Telemetry";
+                    const score = typeof item.threat_score === "number" ? item.threat_score : (typeof payload.threat_score === "number" ? payload.threat_score : 0.0);
+                    const key = `${tName}-${pid ?? item.id}`;
+                    seenKeys.add(key);
+
+                    // Match associated verdict if available
+                    const matchedVerdict = verdicts.find(
+                      (v) => (v && v.details && v.details.pid === pid) || (v && v.event_type === item.event_type) || (v && v.origin_agent_id === item.agent_id)
+                    );
+
+                    const verdictText = matchedVerdict
+                      ? (matchedVerdict.severity || matchedVerdict.verdict_type || "CONSENSUS_VERDICT")
+                      : (item.verdict || (score >= 0.75 ? "CRITICAL" : score >= 0.5 ? "SUSPICIOUS" : "NORMAL"));
+
+                    const votingStatus = matchedVerdict
+                      ? (matchedVerdict.consensus_reached ? "QUORUM_REACHED" : "PARTIAL_QUORUM")
+                      : (score >= 0.5 ? "VOTING_IN_PROGRESS" : "VERIFIED_BENIGN");
+
+                    combinedRows.push({
+                      id: item.id || key,
+                      name: tName,
+                      pid: pid,
+                      agent_id: item.agent_id || "agent-linux-01",
+                      threat_score: score,
+                      peer_voting_verdict: verdictText,
+                      voting_status: votingStatus,
+                      timestamp: item.received_at || payload.timestamp || new Date().toISOString(),
+                      target: payload.process || payload.file_path || payload.target_file || tName,
+                      verdict_obj: matchedVerdict || null,
+                    });
+                  });
+
+                  // 2. Active processes in memory from live stream
+                  processes.forEach((proc) => {
+                    const key = `${proc.process}-${proc.pid}`;
+                    if (!seenKeys.has(key)) {
+                      seenKeys.add(key);
+                      const matchedVerdict = verdicts.find(
+                        (v) => (v && v.details && v.details.pid === proc.pid) || (v && v.event_type === proc.process)
+                      );
+
+                      const verdictText = matchedVerdict
+                        ? (matchedVerdict.severity || matchedVerdict.verdict_type)
+                        : (proc.predicted_class || (proc.threat_score >= 0.75 ? "CRITICAL" : proc.threat_score >= 0.5 ? "SUSPICIOUS" : "NORMAL"));
+
+                      const votingStatus = matchedVerdict
+                        ? (matchedVerdict.consensus_reached ? "QUORUM_REACHED" : "PARTIAL_QUORUM")
+                        : (proc.threat_score >= 0.5 ? "VOTING_IN_PROGRESS" : "VERIFIED_BENIGN");
+
+                      combinedRows.push({
+                        id: `proc-${proc.pid}-${proc.process}`,
+                        name: proc.process,
+                        pid: proc.pid,
+                        agent_id: proc.agent_id || "agent-node-01",
+                        threat_score: proc.threat_score,
+                        peer_voting_verdict: verdictText,
+                        voting_status: votingStatus,
+                        timestamp: proc.timestamp ? new Date(proc.timestamp * 1000).toISOString() : new Date().toISOString(),
+                        target: proc.process,
+                        verdict_obj: matchedVerdict || null,
+                      });
+                    }
+                  });
+
+                  // 3. Fallback: historical verdicts from NeonDB
+                  if (combinedRows.length === 0 && verdicts.length > 0) {
+                    verdicts.forEach((v) => {
+                      if (!v) return;
+                      const pid = v.details?.pid ?? (v.target_pid || null);
+                      combinedRows.push({
+                        id: v.vote_id,
+                        name: v.event_type || "Telemetry Event",
+                        pid: pid,
+                        agent_id: v.origin_agent_id || "agent-linux",
+                        threat_score: v.final_weighted_score ?? v.raw_threat_score ?? 0.0,
+                        peer_voting_verdict: v.severity || (v.consensus_reached ? "CONSENSUS_REACHED" : "EVALUATED"),
+                        voting_status: v.consensus_reached ? "QUORUM_REACHED" : "PARTIAL_QUORUM",
+                        timestamp: v.timestamp ? (typeof v.timestamp === "number" ? new Date(v.timestamp * 1000).toISOString() : v.timestamp) : new Date().toISOString(),
+                        target: v.event_type,
+                        verdict_obj: v,
+                      });
+                    });
+                  }
+
+                  if (combinedRows.length === 0) {
+                    return (
+                      <div className="empty-table-placeholder" style={{ padding: "30px 20px" }}>
+                        <Network size={30} className="muted-icon" style={{ color: "#38bdf8", opacity: 0.7 }} />
+                        <p style={{ marginTop: 10, fontSize: 14, fontWeight: 600 }}>Awaiting Telemetry Ingress</p>
+                        <span style={{ fontSize: 12, color: "#64748b" }}>
+                          Trigger a test telemetry pulse or run endpoint agents to populate live records. The peer consensus mesh visualization above is active and interactive.
+                        </span>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <table className="aegis-table">
+                      <thead>
+                        <tr>
+                          <th>Telemetry Name</th>
+                          <th>PID</th>
+                          <th>Threat Score</th>
+                          <th>Peer Voting Verdict</th>
+                          <th>Voting Status</th>
+                          <th>Timestamp</th>
+                          <th style={{ textAlign: "right" }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {combinedRows.map((row) => {
+                          const threatColor = getThreatColor(row.threat_score);
+                          const isQuorumReached = row.voting_status === "QUORUM_REACHED" || row.voting_status === "CONSENSUS_REACHED";
+                          const isPending = row.voting_status === "VOTING_IN_PROGRESS" || row.voting_status === "PARTIAL_QUORUM";
+
+                          return (
+                            <tr
+                              key={row.id}
+                              onClick={() => setSelectedTelemetryForVoting(row)}
+                              style={{ cursor: "pointer", transition: "background 0.15s ease" }}
+                              className="telemetry-clickable-row"
+                              title="Click to view distributed peer voting visualization for this record"
+                            >
+                              <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: threatColor }} />
+                                  <strong>{row.name}</strong>
+                                  {row.agent_id && (
+                                    <span style={{ fontSize: 10, color: "#64748b", background: "#0b111b", padding: "1px 5px", borderRadius: 3 }}>
+                                      {row.agent_id}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                <code>{row.pid !== null && row.pid !== undefined ? row.pid : "N/A"}</code>
+                              </td>
+                              <td>
+                                <span
+                                  className="threat-pill"
+                                  style={{
+                                    background: `${threatColor}1f`,
+                                    color: threatColor,
+                                    borderColor: `${threatColor}55`,
+                                    display: "inline-block",
+                                    fontWeight: 700,
+                                    padding: "2px 8px",
+                                    borderRadius: 4,
+                                    border: "1px solid",
+                                  }}
+                                >
+                                  {((row.threat_score || 0) * 100).toFixed(1)}%
+                                </span>
+                              </td>
+                              <td>
+                                <span
+                                  className={`verdict-badge ${row.peer_voting_verdict === "LOW" || row.peer_voting_verdict === "NORMAL" || row.peer_voting_verdict === "VERIFIED_BENIGN" ? "normal" : "alert"}`}
+                                >
+                                  {row.peer_voting_verdict}
+                                </span>
+                              </td>
+                              <td>
+                                <span
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    padding: "3px 8px",
+                                    borderRadius: 12,
+                                    background: isQuorumReached ? "rgba(16, 185, 129, 0.15)" : isPending ? "rgba(56, 189, 248, 0.15)" : "rgba(100, 116, 139, 0.15)",
+                                    color: isQuorumReached ? "#10b981" : isPending ? "#38bdf8" : "#94a3b8",
+                                    border: `1px solid ${isQuorumReached ? "rgba(16, 185, 129, 0.3)" : isPending ? "rgba(56, 189, 248, 0.3)" : "rgba(100, 116, 139, 0.3)"}`,
+                                  }}
+                                >
+                                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: isQuorumReached ? "#10b981" : isPending ? "#38bdf8" : "#94a3b8" }} />
+                                  {row.voting_status}
+                                </span>
+                              </td>
+                              <td style={{ fontSize: 12, color: "#94a3b8", fontFamily: "JetBrains Mono, monospace" }}>
+                                {typeof row.timestamp === "string" && row.timestamp.includes("T")
+                                  ? row.timestamp.replace("T", " ").slice(0, 19)
+                                  : row.timestamp}
+                              </td>
+                              <td style={{ textAlign: "right" }}>
+                                <button
+                                  className="btn-badge-chip"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedTelemetryForVoting(row);
+                                  }}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                    borderColor: "rgba(56, 189, 248, 0.4)",
+                                    color: "#38bdf8",
+                                  }}
+                                >
+                                  Inspect In Mesh <ArrowRight size={12} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  );
+                })()}
+              </div>
             </div>
           </section>
         )}
@@ -1968,7 +2292,7 @@ export default function App() {
         <ReportModal
           isOpen={isReportModalOpen}
           onClose={() => setIsReportModalOpen(false)}
-          apiBase="http://127.0.0.1:8000"
+          apiBase={API_BASE}
         />
 
         {/* Explainable AI (XAI) Modal */}
@@ -1978,7 +2302,7 @@ export default function App() {
           modelKey={xaiModalConfig.modelKey}
           threatScore={xaiModalConfig.threatScore}
           eventData={xaiModalConfig.eventData}
-          apiBase="http://127.0.0.1:8000"
+          apiBase={API_BASE}
         />
       </main>
     </div>

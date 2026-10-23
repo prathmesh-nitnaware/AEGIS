@@ -5,8 +5,8 @@ echo ===========================================================================
 echo        AEGIS AUTONOMOUS SWARM DEFENSE - ONE-COMMAND LAUNCHER
 echo ===============================================================================
 if exist .venv\Scripts\python.exe (
-    .venv\Scripts\python.exe run_all.py
+    .venv\Scripts\python.exe run_all.py %*
 ) else (
-    python run_all.py
+    python run_all.py %*
 )
 pause

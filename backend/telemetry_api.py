@@ -175,8 +175,10 @@ else:
     allowed_origins = [
         "http://localhost:3000",
         "http://localhost:5173",
+        "http://localhost:5174",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
     ]
 
 app.add_middleware(
@@ -407,6 +409,23 @@ async def post_telemetry(event: dict):
     Primary ingestion endpoint. Persists every event to NeonDB,
     updates the in-memory service, and broadcasts to dashboards.
     """
+    agent_id = event.get("agent_id") or event.get("agentId") or "unknown-agent"
+    model = event.get("model") or event.get("event_type") or "telemetry"
+    threat_score = event.get("threat_score", event.get("score", 0.0))
+    verdict = event.get("predicted_class", event.get("verdict", "NORMAL"))
+    proc_name = event.get("process") or event.get("process_name") or "unknown"
+    pid = event.get("pid", 0)
+
+    logger.info(
+        "[AEGIS Telemetry Ingest] Agent: %-18s | Model: %-12s | Threat: %.3f (%s) | Process: %s (PID: %s)",
+        agent_id,
+        model,
+        float(threat_score) if threat_score is not None else 0.0,
+        verdict,
+        proc_name,
+        pid,
+    )
+
     # Legacy in-memory service (keeps existing /api/telemetry/* routes working)
     add_event(event)
     central_repo.add_telemetry(event)
@@ -847,12 +866,12 @@ async def post_centralized_vote(
     if response_act in ("KILL_PROCESS", "QUARANTINE_FILE", "ALERT"):
         try:
             async with get_session() as session:
-                target_pid = details.get("pid") or payload.get("pid")
+                target_pid = details.get("pid") or getattr(payload, "pid", None)
                 target_file = (
                     details.get("target_file")
                     or details.get("filename")
                     or details.get("file_path")
-                    or payload.get("target_file")
+                    or getattr(payload, "target_file", None)
                 )
                 action_row = await enqueue_remote_action(
                     session=session,
@@ -1605,28 +1624,9 @@ async def export_incident_report_pdf(incident_id: str = "INC-CURRENT-001"):
 
 @app.get("/api/attack/targets")
 async def get_attack_targets_endpoint():
-    """Return only agents actually seen through the heartbeat endpoint."""
-    now = time.time()
-    rows = silence_detector.list_agents()
-    targets = []
-    for row in rows:
-        aid = row.get("agent_id")
-        meta = agent_connection_metadata.get(aid, {})
-        age = float(row.get("silence_duration", now - float(row.get("last_seen", 0))))
-        status = str(row.get("status", "unknown")).upper()
-        online = age <= silence_detector.silence_threshold and status not in {"OFFLINE_GRACEFUL", "OFFLINE", "DISCONNECTED"}
-        targets.append({
-            "id": aid,
-            "name": f"AEGIS Agent {aid}",
-            "os": meta.get("os", "Unknown"),
-            "ip": meta.get("ip") or "Unknown (source address unavailable)",
-            "last_seen": row.get("last_seen"),
-            "silence_duration": age,
-            "services": ["AEGIS telemetry"],
-            "status": "ONLINE" if online else ("ALARMED" if row.get("alarm_raised") else "OFFLINE"),
-            "selectable": online and bool(meta.get("ip")),
-        })
-    return targets
+    """Return available targets including default nodes and live registered agents."""
+    from backend.services.simulation_service import get_available_targets
+    return get_available_targets()
 
 
 @app.post("/api/simulation/launch")
@@ -1634,29 +1634,31 @@ async def get_attack_targets_endpoint():
 async def launch_simulation_scenario(payload: dict):
     """
     Launches a simulated attack scenario against a specific target system in the chain.
-    Scenarios: 'linux', 'windows', 'sabotage', 'graceful', 'pcap_ddos', 'pcap_portscan', 'pcap_hydra', 'all'
+    Scenarios: 'linux', 'file', 'windows', 'sabotage', 'graceful', 'pcap_ddos', 'pcap_portscan', 'pcap_hydra', 'consensus', 'all'
     """
     from backend.services.simulation_service import start_simulation
     scenario = payload.get("scenario", "linux")
-
-    allowed_scenarios = {"linux", "file", "windows", "pcap_portscan", "pcap_ddos", "pcap_hydra", "sabotage", "consensus", "all"}
+    allowed_scenarios = {"linux", "file", "windows", "pcap_portscan", "pcap_ddos", "pcap_hydra", "sabotage", "graceful", "consensus", "all"}
     if scenario not in allowed_scenarios:
         raise HTTPException(status_code=400, detail=f"Unsupported scenario: {scenario}")
-    target_id = payload.get("target_id")
+    target_id = payload.get("target_id", "node1-linux")
+    target_ip = payload.get("target_ip", "10.0.0.10")
     custom_config = payload.get("custom_config", {})
     if not target_id:
-        raise HTTPException(status_code=400, detail="Select a registered AEGIS agent first.")
-    now = time.time()
+        raise HTTPException(status_code=400, detail="Select a registered AEGIS agent or target node first.")
+
+    # Check if target_id is a registered live agent
     live = {row.get("agent_id"): row for row in silence_detector.list_agents()}
-    row = live.get(target_id)
-    meta = agent_connection_metadata.get(target_id, {})
-    if not row or not meta.get("ip"):
-        raise HTTPException(status_code=404, detail="Target is not a registered agent with a known source IP.")
-    age = float(row.get("silence_duration", now - float(row.get("last_seen", 0))))
-    if age > silence_detector.silence_threshold or str(row.get("status", "")).upper() in {"OFFLINE_GRACEFUL", "OFFLINE", "DISCONNECTED"}:
-        raise HTTPException(status_code=409, detail="Target agent is offline or its heartbeat is stale.")
-    # Use the IP observed by the heartbeat endpoint; ignore browser-supplied target_ip.
-    target_ip = meta["ip"]
+    if target_id in live:
+        row = live[target_id]
+        meta = agent_connection_metadata.get(target_id, {})
+        now = time.time()
+        age = float(row.get("silence_duration", now - float(row.get("last_seen", 0))))
+        if age > silence_detector.silence_threshold or str(row.get("status", "")).upper() in {"OFFLINE_GRACEFUL", "OFFLINE", "DISCONNECTED"}:
+            raise HTTPException(status_code=409, detail="Target agent is offline or its heartbeat is stale.")
+        if meta.get("ip"):
+            target_ip = meta["ip"]
+
     res = start_simulation(scenario=scenario, target_id=target_id, target_ip=target_ip, custom_config=custom_config)
 
     allowed_scenarios = {"linux", "file", "windows", "pcap_portscan",
@@ -1777,6 +1779,7 @@ async def list_attack_payload_templates_endpoint():
             "description": "Issues SIGKILL to monitoring daemons to evaluate victim 15s Silence-as-Alarm detection logic.",
         },
     ]
+
 
 
 # ============================================================
