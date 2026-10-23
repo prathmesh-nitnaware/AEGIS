@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, update, desc
@@ -65,7 +66,6 @@ async def persist_telemetry_event(
 ) -> TelemetryEvent:
     """Persist a raw telemetry event dict and return the ORM row."""
     uid = event_uid or event.get("id") or _short_id()
-
     # Safely convert threat score
     try:
         t_score = float(event.get("threat_score", event.get("score", 0.0)))
@@ -88,7 +88,6 @@ async def persist_telemetry_event(
                     parsed_ts = parsed_ts / 1e6
             except ValueError:
                 try:
-                    from datetime import datetime
                     dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
                     parsed_ts = dt.timestamp()
                 except Exception:
@@ -172,9 +171,26 @@ async def persist_consensus_verdict(
     session: AsyncSession,
     verdict: Dict[str, Any],
 ) -> ConsensusVerdict:
-    """Persist a voting verdict dict and return the ORM row."""
+    """Persist a voting verdict dict and return the ORM row. Idempotent on vote_id."""
+    target_vote_id = verdict.get("vote_id") or _short_id()
+
+    # Avoid duplicate key conflicts if verdict was already recorded
+    existing_stmt = select(ConsensusVerdict).where(ConsensusVerdict.vote_id == target_vote_id)
+    existing_result = await session.execute(existing_stmt)
+    existing_row = existing_result.scalar_one_or_none()
+
+    if existing_row is not None:
+        existing_row.final_weighted_score = float(verdict.get("final_weighted_score", existing_row.final_weighted_score))
+        existing_row.severity = verdict.get("severity", existing_row.severity)
+        existing_row.response_action = verdict.get("response_action", existing_row.response_action)
+        existing_row.consensus_reached = bool(verdict.get("consensus_reached", existing_row.consensus_reached))
+        existing_row.participating_peers = int(verdict.get("participating_peers", existing_row.participating_peers))
+        existing_row.total_weight = float(verdict.get("total_weight", existing_row.total_weight))
+        await session.flush()
+        return existing_row
+
     row = ConsensusVerdict(
-        vote_id=verdict.get("vote_id") or _short_id(),
+        vote_id=target_vote_id,
         origin_agent_id=verdict.get("origin_agent_id", "unknown"),
         event_type=verdict.get("event_type", "unknown"),
         raw_threat_score=float(verdict.get("raw_threat_score", 0.0)),

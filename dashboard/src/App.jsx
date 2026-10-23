@@ -1060,8 +1060,20 @@ export default function App() {
             <div className="panel model-panel">
               <div className="panel-header">
                 <div>
-                  <h3 className="panel-title">Linux XGBoost Pipeline</h3>
-                  <p className="panel-subtitle">Syscall classification probabilities</p>
+                  <h3 className="panel-title">
+                    {latestEvent?.model
+                      ? `${latestEvent.model.replace(/_/g, " ").toUpperCase()} Pipeline`
+                      : "Multi-Model Threat Pipeline"}
+                  </h3>
+                  <p className="panel-subtitle">
+                    {latestEvent?.model === "cicids"
+                      ? "Live Network Flow Anomaly Classification"
+                      : latestEvent?.model?.startsWith("windows")
+                      ? "Windows Process Context & ETW Telemetry"
+                      : latestEvent?.model === "linux_ids"
+                      ? "Syscall classification probabilities"
+                      : "Autonomous EDR Multi-Model Telemetry"}
+                  </p>
                 </div>
                 <span className={`model-status-badge ${latestEvent ? "online" : "waiting"}`}>
                   <span className="dot" />

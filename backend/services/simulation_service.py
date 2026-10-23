@@ -77,6 +77,7 @@ def get_available_targets() -> List[Dict[str, Any]]:
             "status": "ONLINE",
             "ping_ms": 12.4,
             "architecture": "x86_64",
+            "selectable": True,
         },
         {
             "id": "node2-windows",
@@ -88,6 +89,7 @@ def get_available_targets() -> List[Dict[str, Any]]:
             "status": "ONLINE",
             "ping_ms": 18.2,
             "architecture": "AMD64",
+            "selectable": True,
         },
         {
             "id": "node3-database",
@@ -99,6 +101,7 @@ def get_available_targets() -> List[Dict[str, Any]]:
             "status": "ONLINE",
             "ping_ms": 9.8,
             "architecture": "x86_64",
+            "selectable": True,
         },
         {
             "id": "node4-gateway",
@@ -110,6 +113,7 @@ def get_available_targets() -> List[Dict[str, Any]]:
             "status": "ONLINE",
             "ping_ms": 6.1,
             "architecture": "ARM64",
+            "selectable": True,
         },
         {
             "id": "swarm-broadcast",
@@ -121,31 +125,39 @@ def get_available_targets() -> List[Dict[str, Any]]:
             "status": "ONLINE",
             "ping_ms": 14.5,
             "architecture": "Distributed",
+            "selectable": True,
         },
     ]
 
-    # Dynamically inject registered live agents from central repo if available
+    # Dynamically inject registered live agents from central repo / silence detector if available
     try:
-        from backend.telemetry_api import central_repo
-        if central_repo:
-            all_agents = central_repo.get_all_agents()
-            for agent_id, agent_info in all_agents.items():
-                if not any(t["id"] == agent_id for t in targets):
-                    targets.append({
-                        "id": agent_id,
-                        "name": f"Agent {agent_id}",
-                        "os": agent_info.get("os", "Linux/Windows"),
-                        "ip": agent_info.get("ip", "127.0.0.1"),
-                        "services": ["AEGIS Agent Telemetry (Heartbeat / Syscall)"],
-                        "vulnerabilities": ["Live Target Ingestion"],
-                        "status": "ONLINE" if not agent_info.get("alarm_raised") else "ALARMED",
-                        "ping_ms": 2.1,
-                        "architecture": agent_info.get("architecture", "Native"),
-                    })
+        from backend.telemetry_api import silence_detector, agent_connection_metadata
+        now = time.time()
+        for row in silence_detector.list_agents():
+            aid = row.get("agent_id")
+            meta = agent_connection_metadata.get(aid, {})
+            age = float(row.get("silence_duration", now - float(row.get("last_seen", 0))))
+            raw_status = str(row.get("status", "unknown")).upper()
+            online = age <= silence_detector.silence_threshold and raw_status not in {"OFFLINE_GRACEFUL", "OFFLINE", "DISCONNECTED"}
+            if not any(t["id"] == aid for t in targets):
+                targets.append({
+                    "id": aid,
+                    "name": f"AEGIS Agent {aid}",
+                    "os": meta.get("os", "Unknown"),
+                    "ip": meta.get("ip") or "127.0.0.1",
+                    "last_seen": row.get("last_seen"),
+                    "silence_duration": age,
+                    "services": ["AEGIS telemetry (Heartbeat / Syscall)"],
+                    "vulnerabilities": ["Live Target Ingestion"],
+                    "status": "ONLINE" if online else ("ALARMED" if row.get("alarm_raised") else "OFFLINE"),
+                    "selectable": online and bool(meta.get("ip")),
+                    "ping_ms": 2.1,
+                    "architecture": meta.get("architecture", "Native"),
+                })
+        return targets
     except Exception:
-        pass
-
-    return targets
+        logger.exception("Unable to build live agent target list")
+        return []
 
 
 def probe_target(ip: str, port: Optional[int] = None) -> Dict[str, Any]:
@@ -200,7 +212,8 @@ def get_simulation_status() -> Dict[str, Any]:
 
 def reset_simulation_state():
     with _state_lock:
-        _simulation_state["is_running"] = False
+        if _simulation_state["is_running"]:
+            return False
         _simulation_state["current_scenario"] = None
         _simulation_state["active_phase"] = "IDLE"
         _simulation_state["progress"] = 0
@@ -215,6 +228,7 @@ def reset_simulation_state():
             "participating_peers": 0,
             "status": "STANDBY",
         }
+        return True
 
 
 def _append_log(message: str, level: str = "INFO", step: Optional[int] = None, data: Optional[dict] = None):
@@ -244,6 +258,30 @@ def _append_log(message: str, level: str = "INFO", step: Optional[int] = None, d
         })
     except Exception:
         pass
+
+
+def _publish_lab_event(target_id: str, scenario: str, event_type: str, threat_score: float = 0.72) -> None:
+    """Publish clearly labelled synthetic lab telemetry; never claim live compromise."""
+    event = {
+        "timestamp": int(time.time() * 1000000),
+        "agent_id": target_id,
+        "target_agent_id": target_id,
+        "event_type": event_type,
+        "scenario": scenario,
+        "process": "aegis-lab-simulation",
+        "source": "red_team_dashboard_simulation",
+        "simulation": True,
+        "threat_score": threat_score,
+        "predicted_class": "SIMULATED_TEST_EVENT",
+        "message": f"Synthetic {scenario} test event for dashboard integration validation",
+    }
+    try:
+        from backend.telemetry_api import add_event, central_repo, publish_event
+        add_event(event)
+        central_repo.add_telemetry(event)
+        publish_event(event)
+    except Exception:
+        logger.exception("Unable to publish synthetic lab telemetry")
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +315,6 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
             _simulation_state["custom_config"].update(custom_config)
 
     _append_log(f"⚔️ [C2 ENGAGEMENT] Launching Vector: [{scenario.upper()}] -> Target: [{target_id}] ({target_ip}:{target_port}) [Intensity: {intensity.upper()}, Threads: {concurrency}]", "INFO", step=1)
-
     victim_info = {}
 
     try:
@@ -304,6 +341,7 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
             time.sleep(0.4)
 
             # Execute actual simulation
+            simulate_linux_attacks.AGENT_ID = target_id
             sim_res = simulate_linux_attacks.run_simulation(target_agent_id=target_id)
 
             with _state_lock:
@@ -324,7 +362,7 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
             }
             _append_log(f"🛡️ [VICTIM REACTION] AEGIS Autonomous Agent executed KILL_PROCESS on PID 6012. Attack halted in 268ms!", "SUCCESS", step=5)
 
-        elif scenario == "windows":
+        elif scenario in {"windows", "file"}:
             _append_log(f"[*] Delivering uncompiled PE dropper with RWX memory sections to %TEMP% on {target_ip}...", "WARNING", step=2)
             time.sleep(0.4)
             with _state_lock:
@@ -334,7 +372,9 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
             time.sleep(0.4)
 
             # Execute actual simulation
+            simulate_windows_ransomware.AGENT_ID = target_id
             sim_res = simulate_windows_ransomware.run_simulation(target_agent_id=target_id)
+            _publish_lab_event(target_id, "suspicious_file", "file_activity_simulation", 0.72)
 
             with _state_lock:
                 _simulation_state["progress"] = 85
@@ -353,8 +393,27 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
             }
             _append_log(f"🛡️ [VICTIM REACTION] Dropper isolated to encrypted vault (.aegis_quarantine/) & host network link severed in 194ms!", "SUCCESS", step=5)
 
+        elif scenario == "consensus":
+            _append_log(f"[*] Publishing a labelled synthetic threat event for consensus-path demonstration on {target_id}...", "INFO", step=1)
+            _publish_lab_event(target_id, "multi_node_consensus", "consensus_simulation", 0.88)
+            with _state_lock:
+                _simulation_state["progress"] = 85
+                _simulation_state["active_phase"] = "CONSENSUS_VOTING"
+            time.sleep(0.4)
+            victim_info = {
+                "detected": True,
+                "detector_model": "Multi-Node Peer Consensus Protocol",
+                "threat_score": 0.88,
+                "consensus_verdict": "HIGH",
+                "response_action": "SWARM_VOTE_QUORUM",
+                "mitigation_time_ms": 180,
+                "participating_peers": 3,
+                "status": "QUORUM_ESTABLISHED",
+            }
+            _append_log("🛡️ [VICTIM REACTION] Distributed consensus quorum validated across peer nodes.", "SUCCESS", step=5)
+
         elif scenario == "pcap_ddos":
-            _append_log(f"[*] Blasting target {target_ip}:{target_port} with 200 pkts/sec randomized TCP SYN flood...", "WARNING", step=2)
+            _append_log(f"[*] Replaying stored SYN-flood PCAP against target {target_ip}:{target_port} (200 pkts/sec)...", "WARNING", step=2)
             from backend.services.pcap_service import pcap_service
             pcap_service.start_replay("syn_flood_ddos.pcap", speed_multiplier=12.0)
             with _state_lock:
@@ -477,9 +536,14 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
                     _simulation_state["active_phase"] = phase_tag
 
                 if sc_name == "linux":
+                    simulate_linux_attacks.AGENT_ID = target_id
                     simulate_linux_attacks.run_simulation(target_agent_id=target_id)
-                elif sc_name == "windows":
+                elif sc_name in {"windows", "file"}:
+                    simulate_windows_ransomware.AGENT_ID = target_id
                     simulate_windows_ransomware.run_simulation(target_agent_id=target_id)
+                    _publish_lab_event(target_id, "suspicious_file", "file_activity_simulation", 0.72)
+                elif sc_name == "consensus":
+                    _publish_lab_event(target_id, "multi_node_consensus", "consensus_simulation", 0.88)
                 elif sc_name == "sabotage":
                     simulate_silence_tamper.run_simulation(target_agent_id=target_id)
                 elif sc_name.startswith("pcap_"):
@@ -512,6 +576,9 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
             "target": target_id,
             "target_ip": target_ip,
             "status": "COMPLETED",
+            "execution_type": "SIMULATION_OR_PCAP_REPLAY",
+            "detection_confirmed": False,
+            "consensus_confirmed": False,
             "duration": duration,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "victim_feedback": victim_info,

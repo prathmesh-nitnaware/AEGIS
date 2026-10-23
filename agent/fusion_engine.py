@@ -27,9 +27,10 @@ Design decisions
 from __future__ import annotations
 
 import logging
+import sys
 import warnings
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import joblib
 import numpy as np
@@ -496,6 +497,7 @@ class ThreatFusionEngine:
         self,
         syscall_sequence: Optional[Sequence[int]] = None,
         api_call_sequence: Optional[Sequence[str]] = None,
+        process_features: Optional[Union[Sequence[float], Any]] = None,
     ) -> Optional[float]:
         """
         Score a process event against the Linux IDS or Windows Advanced model.
@@ -506,6 +508,9 @@ class ThreatFusionEngine:
             Raw Linux syscall numbers.  Triggers the Linux IDS (Model 1).
         api_call_sequence : list[str], optional
             Windows API/DLL call name strings.  Triggers Windows Advanced (Model 2).
+        process_features : list[float] or ProcessContextState, optional
+            Windows process context features (9-dimensional vector from V3 or ProcessContextState).
+            Triggers Windows Advanced V3 (Model 2c - 97.4% accuracy).
 
         Returns
         -------
@@ -513,6 +518,17 @@ class ThreatFusionEngine:
         """
         if syscall_sequence is not None:
             return self._score_linux(syscall_sequence)
+        if process_features is not None:
+            # If a ProcessContextState object was passed, extract features dynamically
+            if hasattr(process_features, "command_line") and hasattr(process_features, "image"):
+                try:
+                    from agent.windows_process_context import WindowsAdvancedV3FeatureExtractor
+
+                    feats = WindowsAdvancedV3FeatureExtractor.extract_features(process_features)
+                    return self.score_windows_v3(feats)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[windows_v3] Feature extraction from state failed: %s", exc)
+            return self.score_windows_v3(process_features)
         if api_call_sequence is not None:
             return self._score_windows(api_call_sequence)
         return None
@@ -532,7 +548,11 @@ class ThreatFusionEngine:
         if syscall_sequence is None or len(syscall_sequence) == 0:
             return 0.0
         try:
-            x = self._pad_truncate(syscall_sequence, 500).reshape(1, -1)
+            # Map modern Linux x86_64 syscalls to legacy training equivalents
+            # (e.g. openat 257 -> open 2, newfstatat 262 -> fstat 5, getrandom 318 -> read 0)
+            compat_map = {257: 2, 262: 5, 318: 0, 332: 5, 293: 136}
+            translated = [compat_map.get(int(s), int(s)) for s in syscall_sequence]
+            x = self._pad_truncate(translated, 500).reshape(1, -1)
             proba = self._linux_model.predict_proba(x)[0]
 
             # Locate the "Normal" class index dynamically
@@ -953,35 +973,93 @@ class ThreatFusionEngine:
             decision: float = float(self._zday_model.decision_function(x)[0])
             score = 1.0 / (1.0 + np.exp(30.0 * (decision - 0.025)))
 
-            # If the process is completely unknown / OOV, guarantee anomaly baseline
-            if process_enc == proc_fallback:
-                score = max(score, 0.75)
+            p_str = str(process_name).strip()
+            p_lower = p_str.lower()
+            u_upper = str(user_name).upper()
+            is_loopback = str(ip).strip() in ("0.0.0.0", "127.0.0.1", "::1", "localhost")
+            is_local = is_loopback or str(ip).startswith(("192.168.", "10.", "172.16."))
 
             # Allowlist / threshold calibration with Masquerading Protection:
-            # Requires matching SYSTEM / LOCAL SERVICE context for core OS services
             core_system_services = {
-                "svchost.exe", "services.exe", "lsass.exe", "smss.exe", "csrss.exe", "dwm.exe"
+                "svchost.exe", "services.exe", "lsass.exe", "smss.exe", "csrss.exe",
+                "dwm.exe", "dllhost.exe", "runtimebroker.exe", "sihost.exe",
+                "backgroundtaskhost.exe", "taskhostw.exe", "smartscreen.exe"
             }
             standard_user_apps = {
                 "explorer.exe", "conhost.exe", "taskhostw.exe", "searchhost.exe",
                 "startmenuexperiencehost.exe", "textinputhost.exe", "ctfmon.exe",
                 "chrome.exe", "cursor.exe", "code.exe", "py.exe", "python.exe",
-                "cmd.exe", "powershell.exe", "antigravity-ide.exe"
+                "cmd.exe", "powershell.exe", "antigravity-ide.exe", "snippingtool.exe",
+                "zoom.exe", "msedgewebview2.exe", "msedge.exe", "notepad.exe"
             }
 
-            p_lower = str(process_name).lower()
-            u_upper = str(user_name).upper()
-            is_loopback = str(ip).strip() in ("0.0.0.0", "127.0.0.1", "::1", "localhost")
-            is_local = is_loopback or str(ip).startswith(("192.168.", "10.", "172.16."))
+            # Linux core system services & standard administrative utilities
+            linux_core_services = {
+                "systemd", "systemd-journald", "systemd-udevd", "systemd-logind",
+                "systemd-resolved", "dbus-daemon", "cron", "rsyslogd", "sshd",
+                "polkitd", "accounts-daemon", "networkmanager", "wpa_supplicant",
+                "udisksd", "avahi-daemon", "upowerd", "atd", "lightdm", "gdm",
+                "sddm", "xorg", "xfce4-session"
+            }
+            linux_standard_utilities = {
+                "bash", "zsh", "sh", "sudo", "su", "grep", "egrep", "fgrep",
+                "ip", "ps", "top", "htop", "ls", "cat", "awk", "sed", "find",
+                "which", "command-not-fou", "command-not-found", "onboard",
+                "nano", "vim", "curl", "wget", "python", "python3", "whoami",
+                "id", "uname", "df", "free", "dmesg", "journalctl",
+                "xfce4-panel", "xfce4-panel-gen", "xfdesktop", "xfwm4", "xterm"
+            }
 
-            if is_loopback:
-                if p_lower in core_system_services or p_lower in standard_user_apps:
-                    score = min(score, 0.15)
-            elif is_local:
-                if p_lower in core_system_services and u_upper in ("SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE"):
-                    score = min(score, 0.15)
-                elif p_lower in standard_user_apps:
+            is_linux_kthread = (
+                p_lower.startswith("kworker/")
+                or p_lower.startswith("ksoftirqd/")
+                or p_lower.startswith("migration/")
+                or p_lower.startswith("rcu_")
+                or (p_lower.startswith("(") and p_lower.endswith(")"))
+            )
+            is_linux_benign = (
+                is_linux_kthread
+                or p_lower in linux_core_services
+                or p_lower in linux_standard_utilities
+            )
+
+            # Detect whether this event originated from a Linux environment
+            # (Linux collector sets event_id="PROC_CREATE", or process is a Linux kernel thread / daemon).
+            # Note: Do not test sys.platform here so Linux-hosted command nodes & CI runners can score Windows events.
+            is_linux_event = (
+                str(event_id).upper() == "PROC_CREATE"
+                or is_linux_kthread
+                or (not p_lower.endswith(".exe") and is_linux_benign)
+            )
+
+            # Check explicit OOV status against the Windows-trained process encoder
+            process_is_oov = (
+                self._zday_process_enc is not None
+                and p_str not in self._zday_process_enc.classes_
+            )
+
+            if is_linux_event:
+                if is_linux_kthread:
+                    score = min(score, 0.05)
+                elif is_linux_benign:
+                    score = min(score, 0.10)
+                elif is_loopback:
+                    # Unknown local process on Linux with no outbound connection:
+                    # Avoid false critical escalation due to Windows OOV feature collapse
                     score = min(score, 0.25)
+            else:
+                # Windows event handling
+                if process_is_oov and not is_loopback:
+                    score = max(score, 0.75)
+
+                if is_loopback:
+                    if p_lower in core_system_services or p_lower in standard_user_apps:
+                        score = min(score, 0.15)
+                elif is_local:
+                    if p_lower in core_system_services and u_upper in ("SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE"):
+                        score = min(score, 0.15)
+                    elif p_lower in standard_user_apps:
+                        score = min(score, 0.25)
 
             return float(np.clip(score, 0.0, 1.0))
         except Exception as exc:  # noqa: BLE001

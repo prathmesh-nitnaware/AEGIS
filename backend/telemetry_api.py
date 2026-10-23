@@ -4,7 +4,7 @@ import time
 import logging
 from typing import Annotated, Any, Dict, List, Optional, Union
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, UploadFile, File, Header, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, UploadFile, File, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.services.rbac_auth_service import rbac_auth_service
@@ -99,6 +99,8 @@ async def _persist_alarm_bg(alarm_payload: dict) -> None:
     except Exception as exc:
         logger.warning("[AEGIS DB] Failed to persist silence alarm: %s", exc)
 
+
+agent_connection_metadata: Dict[str, Dict[str, Any]] = {}
 
 silence_detector = SilenceDetector(
     silence_threshold=15.0,   # AEGIS spec default — no heartbeat for 15s → alarm
@@ -442,6 +444,7 @@ async def test_telemetry():
 @app.post("/api/heartbeat")
 async def post_heartbeat(
     payload: HeartbeatPayload,
+    request: Request,
     authorization: Optional[str] = Header(None, alias="Authorization"),
     x_agent_token: Optional[str] = Header(None, alias="X-AEGIS-Agent-Token"),
 ):
@@ -457,6 +460,14 @@ async def post_heartbeat(
         raise HTTPException(status_code=400, detail="Heartbeat timestamp outside allowed clock skew window.")
 
     data = payload.model_dump()
+    # Record the observed source address for the Red Team live-agent registry.
+    # Do not trust a client-supplied target IP for execution.
+    source_ip = request.client.host if request.client else None
+    agent_connection_metadata[payload.agent_id] = {
+        "ip": source_ip,
+        "os": data.get("os") or data.get("platform") or "Unknown",
+        "last_seen": now,
+    }
     silence_detector.record_heartbeat(data)
     await broadcast({**data, "type": "agent_heartbeat"})
     return {"status": "ok", "agent_id": payload.agent_id}
@@ -572,18 +583,120 @@ async def get_all_agents_trust():
 async def post_p2p_consensus(verdict: P2PConsensusPayload):
     """
     Endpoint for P2PMeshNode to submit calculated consensus verdicts.
-    Persists to DB and broadcasts to dashboards.
+    Persists to DB, records in coordinator history to prevent duplicate re-voting,
+    auto-enqueues mitigation actions, and broadcasts to dashboards.
     """
     verdict_dict = verdict.model_dump()
+
+    # 1. Ensure response_action is populated
+    if not verdict_dict.get("response_action"):
+        verdict_dict["response_action"] = central_coordinator.RESPONSE_ACTIONS.get(
+            verdict_dict.get("severity", "LOW"), "LOG"
+        )
+
+    # 2. Record external verdict in CentralizedVotingCoordinator history for deduplication
+    central_coordinator.record_external_verdict(verdict_dict)
+
+    # 3. Persist to NeonDB/SQLite
     try:
         async with get_session() as session:
             await persist_consensus_verdict(session, verdict_dict)
     except Exception as exc:
         logger.warning("[AEGIS DB] Failed to persist P2P consensus: %s", exc)
 
-    event = {**verdict_dict, "type": "p2p_consensus"}
+    # 4. Auto-enqueue remote mitigation action if High/Critical or action warrants it
+    action_dict = None
+    response_act = verdict_dict.get("response_action")
+    if response_act in ("KILL_PROCESS", "ISOLATE_HOST", "QUARANTINE_FILE", "ALERT"):
+        try:
+            async with get_session() as session:
+                details = verdict_dict.get("details") or {}
+                target_pid = details.get("pid")
+                target_file = (
+                    details.get("target_file")
+                    or details.get("filename")
+                    or details.get("file_path")
+                )
+                action_row = await enqueue_remote_action(
+                    session=session,
+                    agent_id=verdict.origin_agent_id,
+                    action_type=response_act,
+                    vote_id=verdict.vote_id,
+                    target_pid=int(target_pid) if target_pid is not None else None,
+                    target_file=str(target_file) if target_file else None,
+                    command_node_ip=details.get("command_node_ip", "127.0.0.1"),
+                    parameters={"details": details, "severity": verdict.severity},
+                )
+                action_dict = {
+                    "action_id": action_row.action_id,
+                    "agent_id": action_row.agent_id,
+                    "action_type": action_row.action_type,
+                    "vote_id": action_row.vote_id,
+                    "target_pid": action_row.target_pid,
+                    "target_file": action_row.target_file,
+                    "command_node_ip": action_row.command_node_ip,
+                    "status": action_row.status,
+                    "created_at": action_row.created_at,
+                }
+                logger.info(
+                    "[Dispatcher] Dispatched P2P action %s (%s) to agent %s (vote_id=%s)",
+                    action_row.action_id,
+                    action_row.action_type,
+                    verdict.origin_agent_id,
+                    verdict.vote_id,
+                )
+                await broadcast({
+                    "type": "remote_action_dispatched",
+                    "action": action_dict,
+                })
+        except Exception as exc:
+            logger.warning("[AEGIS DB] Failed to enqueue remote action for P2P consensus: %s", exc)
+
+    event = {**verdict_dict, "type": "p2p_consensus", "dispatched_action": action_dict}
     await broadcast(event)
-    return {"status": "published", "vote_id": verdict.vote_id}
+    return {
+        "status": "published",
+        "vote_id": verdict.vote_id,
+        "verdict": verdict_dict,
+        "dispatched_action": action_dict,
+    }
+
+
+@app.get("/api/voting/latest")
+async def get_voting_latest():
+    """Retrieve the latest consensus verdict (centralized or P2P) with full details."""
+    verdicts = central_coordinator.get_verdicts(limit=1)
+    if verdicts:
+        return {"status": "success", "verdict": verdicts[0]}
+
+    try:
+        async with get_session() as session:
+            rows = await get_verdicts_history(session, limit=1)
+            if rows:
+                r = rows[0]
+                return {
+                    "status": "success",
+                    "verdict": {
+                        "vote_id": r.vote_id,
+                        "origin_agent_id": r.origin_agent_id,
+                        "event_type": r.event_type,
+                        "raw_threat_score": r.raw_threat_score,
+                        "final_weighted_score": r.final_weighted_score,
+                        "severity": r.severity,
+                        "response_action": r.response_action,
+                        "consensus_reached": r.consensus_reached,
+                        "participating_peers": r.participating_peers,
+                        "total_weight": r.total_weight,
+                        "timestamp": r.verdict_timestamp,
+                        "quorum_status": "CONSENSUS_REACHED" if r.consensus_reached else "NO_QUORUM",
+                        "verdict_type": "PEER_CONSENSUS_VERDICT" if r.consensus_reached else "LOCAL_EMERGENCY_VERDICT",
+                        "peer_votes": [],
+                    },
+                }
+    except Exception as exc:
+        logger.warning("[AEGIS DB] Failed to fetch latest verdict from DB: %s", exc)
+
+    return {"status": "none", "verdict": None}
 
 
 @app.post("/api/p2p/vote")
@@ -683,6 +796,7 @@ async def post_centralized_vote(
         threat_score=threat_score,
         confidence=confidence,
         details=details,
+        vote_id=payload.vote_id,
     )
 
     # ── Persist verdict to NeonDB ──
@@ -1432,7 +1546,7 @@ async def export_incident_report_pdf(incident_id: str = "INC-CURRENT-001"):
 
 @app.get("/api/attack/targets")
 async def get_attack_targets_endpoint():
-    """Returns list of active swarm nodes and target systems available for exploitation."""
+    """Return available targets including default nodes and live registered agents."""
     from backend.services.simulation_service import get_available_targets
     return get_available_targets()
 
@@ -1442,13 +1556,31 @@ async def get_attack_targets_endpoint():
 async def launch_simulation_scenario(payload: dict):
     """
     Launches a simulated attack scenario against a specific target system in the chain.
-    Scenarios: 'linux', 'windows', 'sabotage', 'graceful', 'pcap_ddos', 'pcap_portscan', 'pcap_hydra', 'all'
+    Scenarios: 'linux', 'file', 'windows', 'sabotage', 'graceful', 'pcap_ddos', 'pcap_portscan', 'pcap_hydra', 'consensus', 'all'
     """
     from backend.services.simulation_service import start_simulation
     scenario = payload.get("scenario", "linux")
-    target_id = payload.get("target_id", "vm1-linux")
+    allowed_scenarios = {"linux", "file", "windows", "pcap_portscan", "pcap_ddos", "pcap_hydra", "sabotage", "graceful", "consensus", "all"}
+    if scenario not in allowed_scenarios:
+        raise HTTPException(status_code=400, detail=f"Unsupported scenario: {scenario}")
+    target_id = payload.get("target_id", "node1-linux")
     target_ip = payload.get("target_ip", "10.0.0.10")
     custom_config = payload.get("custom_config", {})
+    if not target_id:
+        raise HTTPException(status_code=400, detail="Select a registered AEGIS agent or target node first.")
+
+    # Check if target_id is a registered live agent
+    live = {row.get("agent_id"): row for row in silence_detector.list_agents()}
+    if target_id in live:
+        row = live[target_id]
+        meta = agent_connection_metadata.get(target_id, {})
+        now = time.time()
+        age = float(row.get("silence_duration", now - float(row.get("last_seen", 0))))
+        if age > silence_detector.silence_threshold or str(row.get("status", "")).upper() in {"OFFLINE_GRACEFUL", "OFFLINE", "DISCONNECTED"}:
+            raise HTTPException(status_code=409, detail="Target agent is offline or its heartbeat is stale.")
+        if meta.get("ip"):
+            target_ip = meta["ip"]
+
     res = start_simulation(scenario=scenario, target_id=target_id, target_ip=target_ip, custom_config=custom_config)
     return res
 

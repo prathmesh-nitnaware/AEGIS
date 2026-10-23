@@ -65,6 +65,7 @@ export default function App() {
   const [isCustomMode, setIsCustomMode] = useState(false);
   const [isProbing, setIsProbing] = useState(false);
   const [probeResult, setProbeResult] = useState(null);
+  const [launchError, setLaunchError] = useState("");
 
   // Attack Execution State
   const [attackState, setAttackState] = useState({
@@ -127,11 +128,13 @@ export default function App() {
 
       if (res.ok) {
         const data = await res.json();
-        setTargets(data);
+        const list = Array.isArray(data) ? data : (data.agents || []);
+        setTargets(list);
         setGatewayStatus("CONNECTED");
-        if (data.length > 0 && !selectedTarget) {
-          setSelectedTarget(data[0]);
-        }
+        setSelectedTarget((current) => {
+          const stillAvailable = list.find((t) => t.id === current?.id && t.selectable !== false && t.status === "ONLINE");
+          return stillAvailable || list.find((t) => t.selectable !== false && t.status === "ONLINE") || null;
+        });
       } else {
         setGatewayStatus("ERROR");
       }
@@ -148,6 +151,14 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setAttackState(data);
+        if (data.history) {
+          setExploitStats((prev) => ({
+            ...prev,
+            totalLaunched: data.history.length,
+            successfulBreaches: data.history.filter((h) => h.detection_confirmed === true).length,
+            victimQuorumsTriggered: data.history.filter((h) => h.consensus_confirmed === true).length,
+          }));
+        }
       }
     } catch (err) {
       console.warn("Poll status error:", err);
@@ -187,9 +198,11 @@ export default function App() {
   useEffect(() => {
     fetchTargets();
     pollStatus();
+    const targetTimer = setInterval(fetchTargets, 5000);
     pollTimerRef.current = setInterval(pollStatus, 450);
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      clearInterval(targetTimer);
     };
   }, [fetchTargets, pollStatus]);
 
@@ -227,28 +240,32 @@ export default function App() {
   // 4. Launch Exploitation Vector
   const launchAttack = async (scenarioKey) => {
     try {
-      const targetId = isCustomMode ? "custom-target" : selectedTarget.id;
-      const targetIp = isCustomMode ? (customIp || "10.0.0.99") : selectedTarget.ip;
-
+      setLaunchError("");
+      if (!selectedTarget || selectedTarget.status !== "ONLINE" || selectedTarget.selectable === false) {
+        setLaunchError("Select a registered online AEGIS agent with a known source IP first.");
+        return;
+      }
       const res = await fetch(`${gatewayUrl}/api/attack/launch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           scenario: scenarioKey,
-          target_id: targetId,
-          target_ip: targetIp,
+          target_id: selectedTarget.id,
           custom_config: customConfig,
         }),
       });
 
+      const body = await res.json().catch(() => ({}));
       if (res.ok) {
         showToast(`Exploit ${scenarioKey.toUpperCase()} launched against ${targetIp}`);
         pollStatus();
       } else {
-        const err = await res.json();
-        showToast(err.message || "Failed to dispatch exploit.");
+        const errorMsg = body.detail || body.message || `Launch rejected (${res.status})`;
+        setLaunchError(errorMsg);
+        showToast(errorMsg);
       }
     } catch (err) {
+      setLaunchError(`Backend request failed: ${err.message}`);
       showToast("Dispatch error: " + err.message);
     }
   };
@@ -324,8 +341,8 @@ export default function App() {
       targetPort: 22,
     },
     {
-      id: "windows",
-      title: "Windows Ransomware & Dropper Infiltration",
+      id: "file",
+      title: "Suspicious File / Ransomware-like Simulation",
       tag: "MALWARE / IMPACT",
       icon: Skull,
       color: "#f97316",
@@ -384,15 +401,15 @@ export default function App() {
       targetPort: 8000,
     },
     {
-      id: "graceful",
-      title: "Stealth Drain & Planned Maintenance Probe",
-      tag: "MAINTENANCE PROBE",
-      icon: Activity,
+      id: "consensus",
+      title: "Multi-node Threat Consensus Simulation",
+      tag: "DISTRIBUTED DEFENSE",
+      icon: Layers,
       color: "#10b981",
       bgGradient: "linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(4, 120, 87, 0.25) 100%)",
-      mitre: "Benign Admin Action",
-      description: "Sends an authorized OS shutdown and maintenance token to ensure the victim defense system suppresses false alarms during approved work.",
-      payloads: ["SIGTERM graceful drain", "Maintenance window token", "Zero false-alarm verification"],
+      mitre: "AEGIS P2P / Consensus",
+      description: "Runs a controlled multi-node consensus workflow simulation and produces a traceable event for dashboard verification.",
+      payloads: ["Synthetic threat event", "Consensus path", "Result verification"],
       targetPort: 8000,
     },
   ];
@@ -647,6 +664,13 @@ export default function App() {
 
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 <button
+                  onClick={fetchTargets}
+                  style={{ background: "rgba(39,39,42,.7)", border: "1px solid #52525b", color: "#e4e4e7", padding: "6px 12px", borderRadius: "6px", fontSize: "0.8rem", cursor: "pointer" }}
+                >
+                  Refresh agents
+                </button>
+
+                <button
                   onClick={handleProbeTarget}
                   disabled={isProbing}
                   style={{
@@ -689,6 +713,15 @@ export default function App() {
               </div>
             </div>
 
+            <div style={{ color: "#a1a1aa", fontSize: "0.8rem" }}>
+              Only agents that have sent a recent heartbeat are selectable. Tests in this dashboard are lab simulations or stored-PCAP replays unless explicitly stated otherwise.
+            </div>
+            {launchError && (
+              <div role="alert" style={{ padding: "10px 12px", borderRadius: "8px", color: "#fecaca", background: "rgba(127,29,29,.35)", border: "1px solid rgba(248,113,113,.5)" }}>
+                {launchError}
+              </div>
+            )}
+
             {probeResult && (
               <div style={{ background: "rgba(9, 9, 11, 0.9)", padding: "10px 14px", borderRadius: "8px", border: "1px solid rgba(16, 185, 129, 0.4)", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.82rem" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -696,7 +729,7 @@ export default function App() {
                   <span>Target {probeResult.target_ip} is <strong>{probeResult.status}</strong> ({probeResult.avg_latency_ms}ms)</span>
                 </div>
                 <div style={{ color: "#a1a1aa" }}>
-                  Open Ports: <strong style={{ color: "#34d399" }}>{probeResult.open_ports.join(", ")}</strong>
+                  Open Ports: <strong style={{ color: "#34d399" }}>{probeResult.open_ports?.join(", ") || "None"}</strong>
                 </div>
               </div>
             )}
