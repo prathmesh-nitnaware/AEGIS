@@ -33,6 +33,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from agent.config import get_command_node_url
 from agent.response_driver import AgentResponseDriver
 
 logger = logging.getLogger("aegis.action_consumer")
@@ -58,7 +59,7 @@ class ActionConsumerDaemon:
     ) -> None:
         self.agent_id = agent_id or os.getenv("AGENT_ID", "agent-local")
         self.command_node_url = (
-            command_node_url or os.getenv("COMMAND_NODE_URL", "http://127.0.0.1:8000")
+            command_node_url or get_command_node_url("http://127.0.0.1:8000")
         ).rstrip("/")
         self.poll_interval = poll_interval
 
@@ -240,7 +241,7 @@ class ActionConsumerDaemon:
 def main():
     parser = argparse.ArgumentParser(description="AEGIS Autonomous Action Consumer Daemon")
     parser.add_argument("--agent-id", default=os.getenv("AGENT_ID", "agent-local"), help="Agent identifier")
-    parser.add_argument("--server", default=os.getenv("COMMAND_NODE_URL", "http://127.0.0.1:8000"), help="Command Node URL")
+    parser.add_argument("--server", default=get_command_node_url("http://127.0.0.1:8000"), help="Command Node URL")
     parser.add_argument("--interval", type=float, default=2.0, help="Polling interval in seconds")
     parser.add_argument("--once", action="store_true", help="Execute pending actions once and exit")
     args = parser.parse_args()

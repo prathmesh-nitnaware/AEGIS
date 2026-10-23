@@ -289,8 +289,7 @@ if getattr(args, "p2p_port", 0) > 0:
         _p2p_node = P2PMeshNode(
             agent_id=getattr(args, "agent_id", "agent-host-local"),
             bind_port=args.p2p_port,
-            command_node_url=getattr(
-                args, "command_node_url", os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000")),
+            command_node_url=COMMAND_NODE_URL,
         )
         _p2p_node.start()
         peers_str = getattr(args, "p2p_peers", "") or os.environ.get("P2P_PEERS", "")

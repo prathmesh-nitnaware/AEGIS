@@ -24,33 +24,11 @@ import sys
 import time
 import requests
 
+from agent.config import get_command_node_url
 from agent.heartbeat import HeartbeatEmitter
 
-# Load local agent/.env or root .env if not yet set
-if "COMMAND_NODE_URL" not in os.environ:
-    from pathlib import Path
-    for env_path in [Path(__file__).resolve().parent / ".env", Path(__file__).resolve().parent.parent / ".env"]:
-        if env_path.is_file():
-            try:
-                for line in env_path.read_text(encoding="utf-8").splitlines():
-                    line = line.strip()
-                    if line.startswith("COMMAND_NODE_URL="):
-                        val = line.split("=", 1)[1].strip().strip('"\'')
-                        if val:
-                            os.environ["COMMAND_NODE_URL"] = val
-                            break
-                    elif line.startswith("MAIN_SERVER_IP="):
-                        val = line.split("=", 1)[1].strip().strip('"\'')
-                        if val:
-                            os.environ["COMMAND_NODE_URL"] = f"http://{val}:8000"
-                            break
-            except Exception:
-                pass
-        if "COMMAND_NODE_URL" in os.environ:
-            break
-
 AGENT_ID = os.getenv("AGENT_ID", "windows-agent-1")
-COMMAND_NODE_URL = os.getenv("COMMAND_NODE_URL", "http://127.0.0.1:8000").rstrip("/")
+COMMAND_NODE_URL = get_command_node_url("http://127.0.0.1:8000")
 HEARTBEAT_INTERVAL = float(os.getenv("HEARTBEAT_INTERVAL", "5.0"))
 
 

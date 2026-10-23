@@ -9,6 +9,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+from agent.config import get_command_node_url
 from agent.linux_model_adapter import LinuxModelAdapter
 
 
@@ -176,7 +177,7 @@ class LinuxTelemetryCollector:
                 import json
                 import urllib.request
 
-                cmd_url = os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000").rstrip("/")
+                cmd_url = get_command_node_url("http://127.0.0.1:8000")
                 req = urllib.request.Request(
                     f"{cmd_url}/api/telemetry",
                     data=json.dumps(event).encode("utf-8"),

@@ -50,13 +50,51 @@ def get_default_log_dir() -> Path:
         return Path("/var/log/aegis")
 
 
+def load_agent_env() -> None:
+    """Loads environment variables from agent/.env and root .env into os.environ if not already present."""
+    base_dirs = [
+        Path(__file__).resolve().parent,         # agent/
+        Path(__file__).resolve().parent.parent,  # project root
+    ]
+    for d in base_dirs:
+        env_file = d / ".env"
+        if env_file.is_file():
+            try:
+                for line in env_file.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, _, v = line.partition("=")
+                    k = k.strip()
+                    v = v.strip().strip('"').strip("'")
+                    if k and k not in os.environ:
+                        os.environ[k] = v
+            except Exception:
+                pass
+
+
+def get_command_node_url(default: str = "http://127.0.0.1:8000") -> str:
+    """
+    Resolves Command Node URL by checking:
+    1. os.environ["COMMAND_NODE_URL"]
+    2. os.environ["MAIN_SERVER_IP"] -> http://{MAIN_SERVER_IP}:8000
+    3. agent/.env or root .env
+    4. fallback to default (http://127.0.0.1:8000)
+    """
+    load_agent_env()
+    url = os.environ.get("COMMAND_NODE_URL")
+    if not url and os.environ.get("MAIN_SERVER_IP"):
+        url = f"http://{os.environ['MAIN_SERVER_IP']}:8000"
+    return (url or default).rstrip("/")
+
+
 @dataclass
 class AegisAgentConfig:
     """Core configuration for an AEGIS EDR Agent daemon."""
 
     # Node Identity & Central Server
     agent_id: str = field(default_factory=lambda: os.environ.get("AGENT_ID", socket.gethostname()))
-    command_node_url: str = field(default_factory=lambda: os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000"))
+    command_node_url: str = field(default_factory=lambda: get_command_node_url("http://127.0.0.1:8000"))
     
     # Heartbeat & Silence-as-Alarm Thresholds
     heartbeat_interval: float = field(default_factory=lambda: float(os.environ.get("HEARTBEAT_INTERVAL", "5.0")))
@@ -111,29 +149,10 @@ class AegisAgentConfig:
             except Exception as exc:
                 print(f"[AEGIS Config] Warning: Could not parse config file at {resolved_path}: {exc}")
 
-        # Check local .env files if COMMAND_NODE_URL was not set in os.environ
-        if "COMMAND_NODE_URL" not in os.environ:
-            for env_candidate in [
-                Path(__file__).resolve().parent / ".env",
-                Path(__file__).resolve().parent.parent / ".env",
-            ]:
-                if env_candidate.exists():
-                    try:
-                        with open(env_candidate, "r", encoding="utf-8") as ef:
-                            for eline in ef:
-                                eline = eline.strip()
-                                if eline.startswith("COMMAND_NODE_URL="):
-                                    val = eline.split("=", 1)[1].strip().strip('"\'')
-                                    if val:
-                                        cfg.command_node_url = val
-                                        break
-                                elif eline.startswith("MAIN_SERVER_IP="):
-                                    val = eline.split("=", 1)[1].strip().strip('"\'')
-                                    if val:
-                                        cfg.command_node_url = f"http://{val}:8000"
-                                        break
-                    except Exception:
-                        pass
+        # Environment variables or .env take precedence over static config file defaults
+        env_url = get_command_node_url(default="")
+        if env_url:
+            cfg.command_node_url = env_url
 
         # Ensure directories exist if we have permissions
         try:
