@@ -164,6 +164,23 @@ parser.add_argument(
     help="URL of central command node (default: COMMAND_NODE_URL or http://127.0.0.1:8000).",
 )
 parser.add_argument(
+    "--servers", dest="extra_servers", default=None,
+    help=(
+        "Comma-separated list of fallback Command Node URLs for load balancing. "
+        "The agent will automatically failover to the next healthy server if the "
+        "primary becomes unreachable. Example: "
+        "--servers http://192.168.1.20:8000,http://192.168.1.21:8000"
+    ),
+)
+parser.add_argument(
+    "--lb-probe-interval", dest="lb_probe_interval", type=float, default=None,
+    help="Seconds between load-balancer health probe cycles (default: 5).",
+)
+parser.add_argument(
+    "--lb-fail-threshold", dest="lb_fail_threshold", type=int, default=None,
+    help="Consecutive health-check failures before failover (default: 2).",
+)
+parser.add_argument(
     "--no-ip-prompt", dest="no_ip_prompt", action="store_true", default=False,
     help="Skip interactive Main Server IP prompt and use default/environment immediately.",
 )
@@ -240,6 +257,47 @@ if args.command_node_url:
 
 test_server_connectivity(COMMAND_NODE_URL)
 os.environ["COMMAND_NODE_URL"] = COMMAND_NODE_URL
+
+# ---------------------------------------------------------------------------
+# Load Balancer — initialise BEFORE starting collectors so every telemetry
+# POST, heartbeat, and action-consumer call goes through failover-aware routing
+# ---------------------------------------------------------------------------
+try:
+    from load_balancer import init_load_balancer, get_active_url, report_delivery_failure
+
+    _lb_extra_servers: list = []
+    if getattr(args, "extra_servers", None):
+        _lb_extra_servers = [s.strip() for s in args.extra_servers.split(",") if s.strip()]
+
+    _lb_kwargs: dict = {}
+    if getattr(args, "lb_probe_interval", None) is not None:
+        _lb_kwargs["probe_interval"] = args.lb_probe_interval
+    if getattr(args, "lb_fail_threshold", None) is not None:
+        _lb_kwargs["fail_threshold"] = args.lb_fail_threshold
+
+    _lb = init_load_balancer(
+        primary_url=COMMAND_NODE_URL,
+        extra_servers=_lb_extra_servers or None,
+        **_lb_kwargs,
+    )
+    print(f"[run_all] Load balancer active — primary: {COMMAND_NODE_URL}")
+    if _lb_extra_servers:
+        for _idx, _fb in enumerate(_lb_extra_servers, 1):
+            print(f"[run_all]   fallback-{_idx}: {_fb}")
+    _LB_AVAILABLE = True
+except Exception as _lb_exc:
+    print(f"[run_all] Warning: Could not start load balancer ({_lb_exc}). Using single server.")
+    _LB_AVAILABLE = False
+
+    def get_active_url() -> str:  # type: ignore[misc]
+        return (
+            getattr(args, 'command_node_url', None)
+            or os.environ.get('COMMAND_NODE_URL')
+            or COMMAND_NODE_URL
+        ).rstrip('/')
+
+    def report_delivery_failure(url: str) -> None:  # type: ignore[misc]
+        pass
 
 OS_NAME = resolve_os(args.os_override)
 COMPATIBLE_COLLECTORS = collectors_for_platform(OS_NAME)
@@ -419,11 +477,9 @@ _telemetry_delivered_count = 0
 def _post_event_async(event_payload: dict) -> None:
     def _send():
         global _last_telemetry_error_time, _telemetry_delivered_count
-        target_url = (
-            getattr(args, 'command_node_url', None)
-            or os.environ.get('COMMAND_NODE_URL')
-            or COMMAND_NODE_URL
-        ).rstrip('/')
+        # Always ask the load balancer for the currently active server so that
+        # telemetry is transparently rerouted after a failover.
+        target_url = get_active_url()
         try:
             import urllib.request
             req = urllib.request.Request(
@@ -437,6 +493,9 @@ def _post_event_async(event_payload: dict) -> None:
                     if _telemetry_delivered_count in (1, 5, 10, 25, 50, 100):
                         print(f"  [+] Shipped telemetry event #{_telemetry_delivered_count} ({event_payload.get('model')}) to Main Server ({target_url})")
         except Exception as exc:
+            # Notify the load balancer of this failure so it can trigger an
+            # early failover if the threshold is reached.
+            report_delivery_failure(target_url)
             now = time.time()
             if now - _last_telemetry_error_time > 10.0:
                 _last_telemetry_error_time = now
@@ -893,9 +952,12 @@ def main():
 
             def _send_heartbeat(payload: dict) -> None:
                 try:
+                    # Use get_active_url() so heartbeats follow load-balancer
+                    # failovers automatically at each pulse interval.
+                    hb_target = get_active_url()
                     data = json.dumps(payload).encode("utf-8")
                     req = urllib.request.Request(
-                        f"{COMMAND_NODE_URL}/api/heartbeat",
+                        f"{hb_target}/api/heartbeat",
                         data=data,
                         headers={"Content-Type": "application/json"},
                     )
@@ -917,13 +979,16 @@ def main():
     try:
         from action_consumer import ActionConsumerDaemon
 
+        # action_consumer reads command_node_url once at init; for failover
+        # support we pass get_active_url() and rely on the env propagation by
+        # the load balancer for the polling URL resolver used at each poll tick.
         action_daemon = ActionConsumerDaemon(
             agent_id=agent_id,
-            command_node_url=COMMAND_NODE_URL,
+            command_node_url=get_active_url(),
             poll_interval=2.0,
         )
         action_daemon.start()
-        print(f"[run_all] Autonomous Action Consumer active for '{agent_id}' -> {COMMAND_NODE_URL}/api/agents/{agent_id}/actions/pending")
+        print(f"[run_all] Autonomous Action Consumer active for '{agent_id}' -> {get_active_url()}/api/agents/{agent_id}/actions/pending")
     except Exception as exc:
         print(f"[run_all] Note: Could not auto-start ActionConsumerDaemon ({exc}).")
 
@@ -967,8 +1032,9 @@ def main():
                         "reason": "USER_KEYBOARD_INTERRUPT",
                         "timestamp": time.time(),
                     }
+                    target_url = get_active_url()
                     req = urllib.request.Request(
-                        f"{COMMAND_NODE_URL}/api/heartbeat/shutdown",
+                        f"{target_url}/api/heartbeat/shutdown",
                         data=json.dumps(shutdown_payload).encode("utf-8"),
                         headers={"Content-Type": "application/json"},
                     )
