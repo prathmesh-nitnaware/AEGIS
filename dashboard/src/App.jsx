@@ -37,6 +37,8 @@ import {
   UserCheck,
   ArrowRight,
   ArrowLeft,
+  ArrowUp,
+  Search,
 } from "lucide-react";
 import {
   AreaChart,
@@ -211,6 +213,11 @@ export default function App() {
   const [agentTrustMap, setAgentTrustMap] = useState({});
   const [auditLogs, setAuditLogs] = useState([]);
   const [feedbackToast, setFeedbackToast] = useState(null);
+
+  // System and Machine IP Telemetry Filtering States
+  const [selectedSystemFilter, setSelectedSystemFilter] = useState(null);
+  const [systemSearchQuery, setSystemSearchQuery] = useState("");
+  const [selectedAgentForTelemetry, setSelectedAgentForTelemetry] = useState(null);
   const [maintForm, setMaintForm] = useState({
     agent_id: "*",
     duration_minutes: 60,
@@ -429,9 +436,12 @@ export default function App() {
   }, []);
 
   /* Trigger test telemetry event */
-  const sendTestPulse = async () => {
+  const sendTestPulse = async (aid = null) => {
     try {
-      await fetch(`${API_BASE}/api/telemetry/test`, { method: "POST" });
+      const url = aid
+        ? `${API_BASE}/api/telemetry/test?agent_id=${encodeURIComponent(aid)}`
+        : `${API_BASE}/api/telemetry/test`;
+      await fetch(url, { method: "POST" });
     } catch (err) {
       console.error("Test pulse error:", err);
     }
@@ -466,6 +476,8 @@ export default function App() {
                 agentId: event.agent_id,
                 status: event.status || "healthy",
                 cpu: event.cpu,
+                ip: event.ip || prev[event.agent_id]?.ip || "127.0.0.1",
+                os: event.os || prev[event.agent_id]?.os || "Unknown",
                 alarmed: false,
                 lastSeen: event.timestamp,
               },
@@ -541,6 +553,7 @@ export default function App() {
           const procName = event.process || event.process_name || (event.file_path ? event.file_path.split(/[\/\\]/).pop() : null) || event.model || "unknown";
           const modelTag = (event.model || "event").toUpperCase();
           const agentIdTag = event.agent_id || event.agentId || "local-node";
+          const agentIp = event.ip || event.source_ip || agents[agentIdTag]?.ip || "127.0.0.1";
 
           // Update active processes/events table
           setProcesses((prev) => {
@@ -548,6 +561,7 @@ export default function App() {
               {
                 process: procName,
                 agent_id: agentIdTag,
+                ip: agentIp,
                 model: modelTag,
                 pid: event.pid || 0,
                 uid: event.uid || 0,
@@ -561,8 +575,23 @@ export default function App() {
               },
               ...prev.filter((p) => p.pid !== (event.pid || 0) || p.process !== procName),
             ];
-            return updated.slice(0, 10);
+            return updated.slice(0, 20);
           });
+
+          // Also sync live event into telemetry records stream
+          setTelemetryRecords((prev) => [
+            {
+              id: event.id || `live-${Date.now()}-${event.pid || 0}`,
+              agent_id: agentIdTag,
+              ip: agentIp,
+              event_type: procName,
+              threat_score: threatScore,
+              verdict: event.predicted_class || event.verdict || "Normal",
+              received_at: new Date().toISOString(),
+              payload: event,
+            },
+            ...prev.slice(0, 49),
+          ]);
 
           // Generate alert if threat threshold is met
           if (threatScore >= 0.35) {
@@ -634,6 +663,8 @@ export default function App() {
             agentId: a.agent_id,
             status: a.alarm_raised ? "silent" : a.status,
             cpu: a.cpu,
+            ip: a.ip || "127.0.0.1",
+            os: a.os || "Unknown",
             alarmed: a.alarm_raised,
             lastSeen: a.last_seen,
           };
@@ -667,6 +698,57 @@ export default function App() {
     : [];
 
   const threatLabel = getThreatLabel(currentThreat);
+
+  // Derive unique known systems with their IPs and statuses
+  const knownSystems = (() => {
+    const sysMap = new Map();
+    // 1. Registered agents from heartbeat
+    Object.values(agents).forEach((a) => {
+      sysMap.set(a.agentId, {
+        agentId: a.agentId,
+        ip: a.ip || "127.0.0.1",
+        os: a.os || "Unknown",
+        status: a.alarmed ? "silent" : (a.status || "healthy"),
+      });
+    });
+    // 2. Any additional origin nodes from processes
+    processes.forEach((p) => {
+      if (p.agent_id && !sysMap.has(p.agent_id)) {
+        sysMap.set(p.agent_id, {
+          agentId: p.agent_id,
+          ip: p.ip || "127.0.0.1",
+          os: "Unknown",
+          status: "active",
+        });
+      }
+    });
+    // 3. Any additional nodes from telemetryRecords
+    telemetryRecords.forEach((t) => {
+      if (t.agent_id && !sysMap.has(t.agent_id)) {
+        sysMap.set(t.agent_id, {
+          agentId: t.agent_id,
+          ip: t.ip || "127.0.0.1",
+          os: "Unknown",
+          status: "active",
+        });
+      }
+    });
+    return Array.from(sysMap.values()).sort((a, b) => a.agentId.localeCompare(b.agentId));
+  })();
+
+  const filteredProcesses = processes.filter((p) => {
+    const agentIp = p.ip || agents[p.agent_id]?.ip || "";
+    const matchesSystem = !selectedSystemFilter || p.agent_id === selectedSystemFilter;
+    const q = systemSearchQuery.trim().toLowerCase();
+    const matchesQuery =
+      !q ||
+      p.process.toLowerCase().includes(q) ||
+      (p.agent_id && p.agent_id.toLowerCase().includes(q)) ||
+      agentIp.toLowerCase().includes(q) ||
+      String(p.pid).includes(q) ||
+      (p.syscall && String(p.syscall).toLowerCase().includes(q));
+    return matchesSystem && matchesQuery;
+  });
 
   return (
     <div className="app">
@@ -1185,21 +1267,94 @@ export default function App() {
         {/* TAB 2: LIVE PROCESS ACTIVITY TABLE */}
         {(activeTab === "overview" || activeTab === "processes") && (
           <section className="panel activity-panel">
-            <div className="panel-header">
+            <div className="panel-header" style={{ flexWrap: "wrap", gap: 12 }}>
               <div>
-                <h3 className="panel-title">Live Process Telemetry</h3>
-                <p className="panel-subtitle">Monitored process syscall windows</p>
+                <h3 className="panel-title">
+                  <Activity size={16} style={{ display: "inline", verticalAlign: "-2px", marginRight: 8, color: "#38bdf8" }} />
+                  Live Process Telemetry
+                </h3>
+                <p className="panel-subtitle">Monitored process syscall windows across connected systems</p>
               </div>
-              <span className="panel-count-badge">{processes.length} Processes</span>
+
+              <div className="telemetry-filter-controls">
+                {/* System / Machine Dropdown Filter */}
+                <div className="system-filter-box" title="Filter telemetry by specific system machine IP">
+                  <Filter size={13} style={{ color: "#38bdf8" }} />
+                  <select
+                    className="system-select-dropdown"
+                    value={selectedSystemFilter || "ALL"}
+                    onChange={(e) => {
+                      const val = e.target.value === "ALL" ? null : e.target.value;
+                      setSelectedSystemFilter(val);
+                      setSelectedAgentForTelemetry(val);
+                    }}
+                  >
+                    <option value="ALL">All Systems &amp; IPs ({knownSystems.length})</option>
+                    {knownSystems.map((sys) => (
+                      <option key={sys.agentId} value={sys.agentId}>
+                        {sys.agentId} — IP: {sys.ip} {sys.os !== "Unknown" ? `(${sys.os})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Instant Search input */}
+                <div className="system-search-box">
+                  <Search size={13} style={{ color: "#64748b" }} />
+                  <input
+                    type="text"
+                    placeholder="Search system, IP, PID..."
+                    value={systemSearchQuery}
+                    onChange={(e) => setSystemSearchQuery(e.target.value)}
+                    className="system-search-input"
+                  />
+                  {systemSearchQuery && (
+                    <button
+                      className="btn-clear-chip"
+                      onClick={() => setSystemSearchQuery("")}
+                      title="Clear search"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <span className="panel-count-badge">
+                  {filteredProcesses.length} / {processes.length} Processes
+                </span>
+              </div>
             </div>
 
+            {/* Active filter chip if filtering */}
+            {selectedSystemFilter && (
+              <div className="active-filter-banner">
+                <span className="active-filter-label">
+                  <Wifi size={13} />
+                  Filtered to Machine: <strong>{selectedSystemFilter}</strong>
+                  <span className="filter-ip-tag">
+                    IP: {agents[selectedSystemFilter]?.ip || knownSystems.find((s) => s.agentId === selectedSystemFilter)?.ip || "127.0.0.1"}
+                  </span>
+                </span>
+                <button
+                  className="btn-reset-filter"
+                  onClick={() => {
+                    setSelectedSystemFilter(null);
+                    setSelectedAgentForTelemetry(null);
+                  }}
+                  title="Clear system filter"
+                >
+                  ✕ Show All Machines
+                </button>
+              </div>
+            )}
+
             <div className="table-wrapper">
-              {processes.length > 0 ? (
+              {filteredProcesses.length > 0 ? (
                 <table>
                   <thead>
                     <tr>
                       <th>Process Name</th>
-                      <th>Origin Node</th>
+                      <th>Origin Machine &amp; IP</th>
                       <th>PID</th>
                       <th>UID</th>
                       <th>Last Syscall / Port</th>
@@ -1209,61 +1364,92 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {processes.map((p) => (
-                      <tr key={`${p.pid}-${p.process}`} className={p.threat_score >= 0.35 ? "highlight-row" : ""}>
-                        <td>
-                          <div className="process-cell">
-                            <Terminal size={15} className="process-icon" />
-                            <strong>{p.process}</strong>
-                          </div>
-                        </td>
-                        <td>
-                          <span style={{ fontSize: "11px", background: "rgba(56, 189, 248, 0.12)", color: "#38bdf8", padding: "2px 7px", borderRadius: "4px", border: "1px solid rgba(56, 189, 248, 0.3)", fontWeight: 600 }}>
-                            {p.agent_id || "node"}
-                          </span>
-                        </td>
-                        <td><code>{p.pid}</code></td>
-                        <td><code>{p.uid}</code></td>
-                        <td>
-                          <code>{p.syscall}</code>
-                          <span className="syscall-tag">
-                            {SYSCALL_NAMES[p.syscall] || "sys_enter"}
-                          </span>
-                        </td>
-                        <td>
-                          <span
-                            className="threat-pill"
-                            style={{
-                              background: getThreatColor(p.threat_score) + "22",
-                              color: getThreatColor(p.threat_score),
-                              borderColor: getThreatColor(p.threat_score) + "55",
-                            }}
-                          >
-                            {(p.threat_score * 100).toFixed(1)}%
-                          </span>
-                        </td>
-                        <td>
-                          <span className={`verdict-badge ${p.predicted_class === "Normal" ? "normal" : "alert"}`}>
-                            {p.predicted_class}
-                          </span>
-                        </td>
-                        <td>
-                          <button
-                            className="btn-inspect"
-                            onClick={() => setSelectedProcess(p)}
-                            title="Inspect full payload"
-                          >
-                            <Eye size={14} /> Inspect
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {filteredProcesses.map((p) => {
+                      const machineIp = p.ip || agents[p.agent_id]?.ip || knownSystems.find((s) => s.agentId === p.agent_id)?.ip || "127.0.0.1";
+                      return (
+                        <tr key={`${p.pid}-${p.process}-${p.agent_id}`} className={p.threat_score >= 0.35 ? "highlight-row" : ""}>
+                          <td>
+                            <div className="process-cell">
+                              <Terminal size={15} className="process-icon" />
+                              <strong>{p.process}</strong>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="origin-machine-badge" title={`Machine IP: ${machineIp}`}>
+                              <span className="origin-agent-name">{p.agent_id || "node"}</span>
+                              <span
+                                className="origin-ip-chip"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedSystemFilter(p.agent_id);
+                                  setSelectedAgentForTelemetry(p.agent_id);
+                                }}
+                                title="Click to filter to this machine"
+                              >
+                                <Wifi size={10} /> {machineIp}
+                              </span>
+                            </div>
+                          </td>
+                          <td><code>{p.pid}</code></td>
+                          <td><code>{p.uid}</code></td>
+                          <td>
+                            <code>{p.syscall}</code>
+                            <span className="syscall-tag">
+                              {SYSCALL_NAMES[p.syscall] || "sys_enter"}
+                            </span>
+                          </td>
+                          <td>
+                            <span
+                              className="threat-pill"
+                              style={{
+                                background: getThreatColor(p.threat_score) + "22",
+                                color: getThreatColor(p.threat_score),
+                                borderColor: getThreatColor(p.threat_score) + "55",
+                              }}
+                            >
+                              {(p.threat_score * 100).toFixed(1)}%
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`verdict-badge ${p.predicted_class === "Normal" ? "normal" : "alert"}`}>
+                              {p.predicted_class}
+                            </span>
+                          </td>
+                          <td>
+                            <button
+                              className="btn-inspect"
+                              onClick={() => setSelectedProcess({ ...p, ip: machineIp })}
+                              title="Inspect full payload"
+                            >
+                              <Eye size={14} /> Inspect
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               ) : (
                 <div className="empty-table-placeholder">
                   <Terminal size={28} className="muted-icon" />
-                  <p>No active process telemetry recorded.</p>
+                  <p>
+                    {selectedSystemFilter
+                      ? `No process telemetry recorded for system "${selectedSystemFilter}".`
+                      : "No active process telemetry recorded."}
+                  </p>
+                  {selectedSystemFilter && (
+                    <button
+                      className="btn-small-pulse"
+                      style={{ marginTop: 8 }}
+                      onClick={() => {
+                        setSelectedSystemFilter(null);
+                        setSelectedAgentForTelemetry(null);
+                        setSystemSearchQuery("");
+                      }}
+                    >
+                      Reset Filter (Show All)
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -1391,35 +1577,260 @@ export default function App() {
               <div>
                 <h3 className="panel-title">
                   <Server size={15} style={{ display: "inline", verticalAlign: "-2px", marginRight: 6 }} />
-                  Agent Health Monitor
+                  Agent Health Monitor &amp; Live Telemetry Inspector
                 </h3>
-                <p className="panel-subtitle">LAN heartbeat status per machine</p>
+                <p className="panel-subtitle">
+                  LAN heartbeat status per machine — Click any agent to inspect its isolated telemetry stream
+                </p>
               </div>
-              <div className="panel-badge">{Object.keys(agents).length} AGENTS</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {selectedAgentForTelemetry && (
+                  <button
+                    className="btn-reset-filter"
+                    onClick={() => {
+                      setSelectedAgentForTelemetry(null);
+                      setSelectedSystemFilter(null);
+                    }}
+                    title="Clear agent filter"
+                  >
+                    ✕ Close Selected ({selectedAgentForTelemetry})
+                  </button>
+                )}
+                <div className="panel-badge">{Object.keys(agents).length} AGENTS</div>
+              </div>
             </div>
 
             <div className="health-list">
               {Object.keys(agents).length > 0 ? (
                 Object.values(agents)
                   .sort((a, b) => a.agentId.localeCompare(b.agentId))
-                  .map((a) => (
-                    <div className="health-item" key={a.agentId}>
-                      <Server size={16} className="health-icon" />
-                      <div className="health-info">
-                        <div className="health-name">{a.agentId}</div>
-                        <div className="health-detail">
-                          {a.alarmed
-                            ? "SILENT — no heartbeat received"
-                            : `${a.status} · CPU ${typeof a.cpu === "number" ? a.cpu.toFixed(1) : a.cpu}%`}
+                  .map((a) => {
+                    const isSelected = selectedAgentForTelemetry === a.agentId;
+                    const agentIp = a.ip || "127.0.0.1";
+
+                    // Collect telemetry events belonging to this agent
+                    const agentEvents = [
+                      ...processes.filter((p) => p.agent_id === a.agentId),
+                      ...telemetryRecords
+                        .filter((r) => r.agent_id === a.agentId)
+                        .map((r) => ({
+                          process: r.event_type || r.payload?.process || "Telemetry Event",
+                          agent_id: r.agent_id,
+                          ip: r.ip || agentIp,
+                          pid: r.payload?.pid ?? "N/A",
+                          syscall: r.payload?.syscall || "sys_enter",
+                          threat_score: r.threat_score ?? 0.0,
+                          predicted_class: r.verdict || "Normal",
+                          timestamp: r.received_at,
+                          payload: r.payload,
+                        })),
+                    ];
+
+                    // Deduplicate events by process + pid + timestamp
+                    const dedupedAgentEvents = [];
+                    const seenEvt = new Set();
+                    agentEvents.forEach((ev) => {
+                      const k = `${ev.process}-${ev.pid}-${ev.timestamp}`;
+                      if (!seenEvt.has(k)) {
+                        seenEvt.add(k);
+                        dedupedAgentEvents.push(ev);
+                      }
+                    });
+
+                    return (
+                      <div key={a.agentId} className={`agent-card-wrapper ${isSelected ? "is-selected" : ""}`}>
+                        <div
+                          className={`health-item clickable ${isSelected ? "selected-agent" : ""}`}
+                          onClick={() => {
+                            if (isSelected) {
+                              setSelectedAgentForTelemetry(null);
+                              setSelectedSystemFilter(null);
+                            } else {
+                              setSelectedAgentForTelemetry(a.agentId);
+                              setSelectedSystemFilter(a.agentId);
+                            }
+                          }}
+                          title={`Click to ${isSelected ? "collapse" : "expand"} telemetry listing for ${a.agentId} (${agentIp})`}
+                        >
+                          <Server size={18} className="health-icon" />
+                          <div className="health-info">
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                              <span className="health-name">{a.agentId}</span>
+                              <span className="agent-ip-pill" title={`Observed IP address for ${a.agentId}`}>
+                                <Wifi size={11} /> {agentIp}
+                              </span>
+                              {a.os && a.os !== "Unknown" && (
+                                <span className="agent-os-pill">{a.os}</span>
+                              )}
+                              <span className="agent-telemetry-count-badge">
+                                {dedupedAgentEvents.length} Telemetries
+                              </span>
+                              {isSelected && (
+                                <span className="active-agent-badge">
+                                  SHOWING TELEMETRY (CLICK TO CLOSE)
+                                </span>
+                              )}
+                            </div>
+                            <div className="health-detail">
+                              {a.alarmed
+                                ? "SILENT — no heartbeat received"
+                                : `${(a.status || "healthy").toUpperCase()} · CPU ${typeof a.cpu === "number" ? a.cpu.toFixed(1) : a.cpu}% · Heartbeat verified`}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <span className="click-hint-text">
+                              {isSelected ? "Hide Telemetry ▲" : "View Telemetry ▼"}
+                            </span>
+                            <div
+                              className={`health-dot ${
+                                a.alarmed ? "disconnected" : a.status === "degraded" ? "connecting" : "active"
+                              }`}
+                            />
+                          </div>
                         </div>
+
+                        {/* EXPANDED TELEMETRY LISTING FOR THIS SPECIFIC AGENT */}
+                        {isSelected && (
+                          <div className="agent-telemetry-drawer">
+                            <div className="drawer-header">
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <Terminal size={15} style={{ color: "#38bdf8" }} />
+                                <div>
+                                  <strong style={{ fontSize: 13, color: "#f1f5f9" }}>
+                                    Live Telemetry Stream for {a.agentId}
+                                  </strong>
+                                  <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 8 }}>
+                                    Machine IP: <code style={{ color: "#38bdf8" }}>{agentIp}</code> · {dedupedAgentEvents.length} events recorded
+                                  </span>
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <button
+                                  className="btn-drawer-action"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    document.querySelector(".activity-panel")?.scrollIntoView({ behavior: "smooth" });
+                                  }}
+                                  title="Scroll up to filtered main table"
+                                >
+                                  <ArrowUp size={12} /> View in Main Feed
+                                </button>
+                                <button
+                                  className="btn-drawer-action"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    sendTestPulse(a.agentId);
+                                  }}
+                                  title="Send test telemetry event for this machine"
+                                >
+                                  <RefreshCw size={12} /> Test Pulse
+                                </button>
+                                <button
+                                  className="btn-drawer-close"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedAgentForTelemetry(null);
+                                    setSelectedSystemFilter(null);
+                                  }}
+                                  title="Close listing"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+
+                            {dedupedAgentEvents.length > 0 ? (
+                              <div className="drawer-table-wrapper">
+                                <table className="aegis-table" style={{ fontSize: 12 }}>
+                                  <thead>
+                                    <tr>
+                                      <th>Process / Event</th>
+                                      <th>Machine IP</th>
+                                      <th>PID</th>
+                                      <th>Syscall / Detail</th>
+                                      <th>Threat Score</th>
+                                      <th>Verdict</th>
+                                      <th>Timestamp</th>
+                                      <th style={{ textAlign: "right" }}>Inspect</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {dedupedAgentEvents.map((t, idx) => (
+                                      <tr key={t.id || idx}>
+                                        <td>
+                                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                            <Terminal size={13} style={{ color: "#38bdf8" }} />
+                                            <strong>{t.process}</strong>
+                                          </div>
+                                        </td>
+                                        <td>
+                                          <code style={{ fontSize: 11, color: "#94a3b8" }}>{t.ip || agentIp}</code>
+                                        </td>
+                                        <td><code>{t.pid}</code></td>
+                                        <td><code>{t.syscall}</code></td>
+                                        <td>
+                                          <span
+                                            className="threat-pill"
+                                            style={{
+                                              background: getThreatColor(t.threat_score) + "22",
+                                              color: getThreatColor(t.threat_score),
+                                              borderColor: getThreatColor(t.threat_score) + "55",
+                                              fontSize: 11,
+                                              padding: "1px 6px",
+                                            }}
+                                          >
+                                            {((t.threat_score || 0) * 100).toFixed(1)}%
+                                          </span>
+                                        </td>
+                                        <td>
+                                          <span className={`verdict-badge ${t.predicted_class === "Normal" ? "normal" : "alert"}`}>
+                                            {t.predicted_class}
+                                          </span>
+                                        </td>
+                                        <td style={{ color: "#64748b", fontSize: 11 }}>
+                                          {formatTimestamp(t.timestamp)}
+                                        </td>
+                                        <td style={{ textAlign: "right" }}>
+                                          <button
+                                            className="btn-inspect"
+                                            style={{ padding: "3px 8px", fontSize: 11 }}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setSelectedProcess({ ...t, ip: agentIp });
+                                            }}
+                                            title="Inspect telemetry JSON"
+                                          >
+                                            <Eye size={12} /> Inspect
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <div className="empty-drawer-placeholder">
+                                <Activity size={22} style={{ color: "#64748b" }} />
+                                <p style={{ margin: "4px 0", fontSize: 12, color: "#94a3b8" }}>
+                                  No telemetry events received from <strong>{a.agentId}</strong> ({agentIp}) yet.
+                                </p>
+                                <button
+                                  className="btn-small-pulse"
+                                  style={{ marginTop: 6, fontSize: 11, padding: "4px 10px" }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    sendTestPulse(a.agentId);
+                                  }}
+                                >
+                                  Trigger Test Pulse for {a.agentId}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <div
-                        className={`health-dot ${
-                          a.alarmed ? "disconnected" : a.status === "degraded" ? "connecting" : "active"
-                        }`}
-                      />
-                    </div>
-                  ))
+                    );
+                  })
               ) : (
                 <div className="empty-table-placeholder">
                   <Server size={28} className="muted-icon" />
@@ -1556,7 +1967,7 @@ export default function App() {
             />
 
             <div className="panel full-width" style={{ marginTop: 20 }}>
-              <div className="panel-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div className="panel-header" style={{ flexWrap: "wrap", gap: 12 }}>
                 <div>
                   <h3 className="panel-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <Network size={18} style={{ color: "#38bdf8" }} />
@@ -1566,7 +1977,49 @@ export default function App() {
                     Active endpoint telemetry records and P2P Byzantine consensus verdicts. Click any telemetry row to view its distributed peer-voting correlation above.
                   </p>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  {/* System / Machine Dropdown Filter */}
+                  <div className="system-filter-box" title="Filter peer voting telemetry by machine IP">
+                    <Filter size={13} style={{ color: "#38bdf8" }} />
+                    <select
+                      className="system-select-dropdown"
+                      value={selectedSystemFilter || "ALL"}
+                      onChange={(e) => {
+                        const val = e.target.value === "ALL" ? null : e.target.value;
+                        setSelectedSystemFilter(val);
+                        setSelectedAgentForTelemetry(val);
+                      }}
+                    >
+                      <option value="ALL">All Systems &amp; IPs ({knownSystems.length})</option>
+                      {knownSystems.map((sys) => (
+                        <option key={sys.agentId} value={sys.agentId}>
+                          {sys.agentId} — IP: {sys.ip} {sys.os !== "Unknown" ? `(${sys.os})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Search box */}
+                  <div className="system-search-box">
+                    <Search size={13} style={{ color: "#64748b" }} />
+                    <input
+                      type="text"
+                      placeholder="Search telemetry, IP, PID..."
+                      value={systemSearchQuery}
+                      onChange={(e) => setSystemSearchQuery(e.target.value)}
+                      className="system-search-input"
+                    />
+                    {systemSearchQuery && (
+                      <button
+                        className="btn-clear-chip"
+                        onClick={() => setSystemSearchQuery("")}
+                        title="Clear search"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
                   <button
                     className="btn-badge-chip"
                     onClick={() => {
@@ -1592,6 +2045,29 @@ export default function App() {
                   )}
                 </div>
               </div>
+
+              {/* Active filter chip if filtering */}
+              {selectedSystemFilter && (
+                <div className="active-filter-banner" style={{ margin: "10px 14px 0" }}>
+                  <span className="active-filter-label">
+                    <Wifi size={13} />
+                    Filtered to Machine: <strong>{selectedSystemFilter}</strong>
+                    <span className="filter-ip-tag">
+                      IP: {agents[selectedSystemFilter]?.ip || knownSystems.find((s) => s.agentId === selectedSystemFilter)?.ip || "127.0.0.1"}
+                    </span>
+                  </span>
+                  <button
+                    className="btn-reset-filter"
+                    onClick={() => {
+                      setSelectedSystemFilter(null);
+                      setSelectedAgentForTelemetry(null);
+                    }}
+                    title="Clear system filter"
+                  >
+                    ✕ Show All Machines
+                  </button>
+                </div>
+              )}
 
               <div className="table-wrapper" style={{ marginTop: 14 }}>
                 {(() => {
@@ -1621,11 +2097,15 @@ export default function App() {
                       ? (matchedVerdict.consensus_reached ? "QUORUM_REACHED" : "PARTIAL_QUORUM")
                       : (score >= 0.5 ? "VOTING_IN_PROGRESS" : "VERIFIED_BENIGN");
 
+                    const rowAid = item.agent_id || "agent-linux-01";
+                    const rowIp = item.ip || payload.ip || agents[rowAid]?.ip || "127.0.0.1";
+
                     combinedRows.push({
                       id: item.id || key,
                       name: tName,
                       pid: pid,
-                      agent_id: item.agent_id || "agent-linux-01",
+                      agent_id: rowAid,
+                      ip: rowIp,
                       threat_score: score,
                       peer_voting_verdict: verdictText,
                       voting_status: votingStatus,
@@ -1652,11 +2132,15 @@ export default function App() {
                         ? (matchedVerdict.consensus_reached ? "QUORUM_REACHED" : "PARTIAL_QUORUM")
                         : (proc.threat_score >= 0.5 ? "VOTING_IN_PROGRESS" : "VERIFIED_BENIGN");
 
+                      const procAid = proc.agent_id || "agent-node-01";
+                      const procIp = proc.ip || agents[procAid]?.ip || "127.0.0.1";
+
                       combinedRows.push({
                         id: `proc-${proc.pid}-${proc.process}`,
                         name: proc.process,
                         pid: proc.pid,
-                        agent_id: proc.agent_id || "agent-node-01",
+                        agent_id: procAid,
+                        ip: procIp,
                         threat_score: proc.threat_score,
                         peer_voting_verdict: verdictText,
                         voting_status: votingStatus,
@@ -1672,11 +2156,14 @@ export default function App() {
                     verdicts.forEach((v) => {
                       if (!v) return;
                       const pid = v.details?.pid ?? (v.target_pid || null);
+                      const vAid = v.origin_agent_id || "agent-linux";
+                      const vIp = v.ip || agents[vAid]?.ip || "127.0.0.1";
                       combinedRows.push({
                         id: v.vote_id,
                         name: v.event_type || "Telemetry Event",
                         pid: pid,
-                        agent_id: v.origin_agent_id || "agent-linux",
+                        agent_id: vAid,
+                        ip: vIp,
                         threat_score: v.final_weighted_score ?? v.raw_threat_score ?? 0.0,
                         peer_voting_verdict: v.severity || (v.consensus_reached ? "CONSENSUS_REACHED" : "EVALUATED"),
                         voting_status: v.consensus_reached ? "QUORUM_REACHED" : "PARTIAL_QUORUM",
@@ -1687,13 +2174,46 @@ export default function App() {
                     });
                   }
 
-                  if (combinedRows.length === 0) {
+                  // Apply active system and search filters
+                  const filteredRows = combinedRows.filter((row) => {
+                    const matchesSystem = !selectedSystemFilter || row.agent_id === selectedSystemFilter;
+                    const q = systemSearchQuery.trim().toLowerCase();
+                    const rowIp = row.ip || agents[row.agent_id]?.ip || "";
+                    const matchesQuery =
+                      !q ||
+                      row.name.toLowerCase().includes(q) ||
+                      (row.agent_id && row.agent_id.toLowerCase().includes(q)) ||
+                      rowIp.toLowerCase().includes(q) ||
+                      (row.pid !== null && String(row.pid).includes(q)) ||
+                      (row.peer_voting_verdict && row.peer_voting_verdict.toLowerCase().includes(q));
+                    return matchesSystem && matchesQuery;
+                  });
+
+                  if (filteredRows.length === 0) {
                     return (
                       <div className="empty-table-placeholder" style={{ padding: "30px 20px" }}>
                         <Network size={30} className="muted-icon" style={{ color: "#38bdf8", opacity: 0.7 }} />
-                        <p style={{ marginTop: 10, fontSize: 14, fontWeight: 600 }}>Awaiting Telemetry Ingress</p>
+                        <p style={{ marginTop: 10, fontSize: 14, fontWeight: 600 }}>
+                          {selectedSystemFilter
+                            ? `No peer voting telemetry found for system "${selectedSystemFilter}".`
+                            : "Awaiting Telemetry Ingress"}
+                        </p>
                         <span style={{ fontSize: 12, color: "#64748b" }}>
-                          Trigger a test telemetry pulse or run endpoint agents to populate live records. The peer consensus mesh visualization above is active and interactive.
+                          {selectedSystemFilter ? (
+                            <button
+                              className="btn-small-pulse"
+                              style={{ marginTop: 8 }}
+                              onClick={() => {
+                                setSelectedSystemFilter(null);
+                                setSelectedAgentForTelemetry(null);
+                                setSystemSearchQuery("");
+                              }}
+                            >
+                              Reset System Filter
+                            </button>
+                          ) : (
+                            "Trigger a test telemetry pulse or run endpoint agents to populate live records."
+                          )}
                         </span>
                       </div>
                     );
@@ -1713,7 +2233,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {combinedRows.map((row) => {
+                        {filteredRows.map((row) => {
                           const threatColor = getThreatColor(row.threat_score);
                           const isQuorumReached = row.voting_status === "QUORUM_REACHED" || row.voting_status === "CONSENSUS_REACHED";
                           const isPending = row.voting_status === "VOTING_IN_PROGRESS" || row.voting_status === "PARTIAL_QUORUM";
@@ -1731,8 +2251,19 @@ export default function App() {
                                   <span style={{ width: 8, height: 8, borderRadius: "50%", background: threatColor }} />
                                   <strong>{row.name}</strong>
                                   {row.agent_id && (
-                                    <span style={{ fontSize: 10, color: "#64748b", background: "#0b111b", padding: "1px 5px", borderRadius: 3 }}>
-                                      {row.agent_id}
+                                    <span
+                                      style={{
+                                        fontSize: 10,
+                                        color: "#38bdf8",
+                                        background: "rgba(56, 189, 248, 0.1)",
+                                        padding: "2px 6px",
+                                        borderRadius: 4,
+                                        border: "1px solid rgba(56, 189, 248, 0.25)",
+                                        fontFamily: "JetBrains Mono, Consolas, monospace",
+                                      }}
+                                      title={`Machine IP: ${row.ip || agents[row.agent_id]?.ip || "127.0.0.1"}`}
+                                    >
+                                      {row.agent_id} · {row.ip || agents[row.agent_id]?.ip || "127.0.0.1"}
                                     </span>
                                   )}
                                 </div>
@@ -2142,6 +2673,13 @@ export default function App() {
                     <span className="stat-key">Last Syscall ID</span>
                     <strong className="stat-val">
                       {selectedProcess.syscall} ({SYSCALL_NAMES[selectedProcess.syscall] || "unknown"})
+                    </strong>
+                  </div>
+
+                  <div className="modal-stat">
+                    <span className="stat-key">Origin Machine &amp; IP</span>
+                    <strong className="stat-val" style={{ color: "#38bdf8", fontFamily: "JetBrains Mono, monospace" }}>
+                      {selectedProcess.agent_id || "node"} ({selectedProcess.ip || agents[selectedProcess.agent_id]?.ip || "127.0.0.1"})
                     </strong>
                   </div>
                 </div>

@@ -404,12 +404,18 @@ def publish_event(event: dict):
 # ============================================================
 
 @app.post("/api/telemetry")
-async def post_telemetry(event: dict):
+async def post_telemetry(event: dict, request: Request):
     """
     Primary ingestion endpoint. Persists every event to NeonDB,
     updates the in-memory service, and broadcasts to dashboards.
     """
     agent_id = event.get("agent_id") or event.get("agentId") or "unknown-agent"
+    event["agent_id"] = agent_id
+    meta = agent_connection_metadata.get(agent_id, {})
+    if not event.get("ip"):
+        source_ip = request.client.host if request.client else None
+        event["ip"] = meta.get("ip") or (source_ip if source_ip not in ("127.0.0.1", "localhost", "::1", None) else None) or "127.0.0.1"
+
     model = event.get("model") or event.get("event_type") or "telemetry"
     threat_score = event.get("threat_score", event.get("score", 0.0))
     verdict = event.get("predicted_class", event.get("verdict", "NORMAL"))
@@ -417,8 +423,9 @@ async def post_telemetry(event: dict):
     pid = event.get("pid", 0)
 
     logger.info(
-        "[AEGIS Telemetry Ingest] Agent: %-18s | Model: %-12s | Threat: %.3f (%s) | Process: %s (PID: %s)",
+        "[AEGIS Telemetry Ingest] Agent: %-18s | IP: %-15s | Model: %-12s | Threat: %.3f (%s) | Process: %s (PID: %s)",
         agent_id,
+        event.get("ip", "unknown"),
         model,
         float(threat_score) if threat_score is not None else 0.0,
         verdict,
@@ -444,10 +451,14 @@ async def post_telemetry(event: dict):
 
 
 @app.post("/api/telemetry/test")
-async def test_telemetry():
+async def test_telemetry(agent_id: Optional[str] = None):
     """Sends a fake telemetry event for dashboard connection testing."""
+    target_aid = agent_id or "node1-test"
+    meta = agent_connection_metadata.get(target_aid, {})
     event = {
         "timestamp": int(time.time() * 1000000),
+        "agent_id": target_aid,
+        "ip": meta.get("ip") or "127.0.0.1",
         "pid": 2929,
         "uid": 1000,
         "process": "antigravity-ide",
@@ -498,14 +509,17 @@ async def post_heartbeat(
     # Record the observed source address for the Red Team live-agent registry.
     # Do not trust a client-supplied target IP for execution.
     source_ip = request.client.host if request.client else None
+    payload_ip = data.get("ip")
+    client_ip = payload_ip if (source_ip in ("127.0.0.1", "localhost", "::1", None) and payload_ip) else (source_ip or payload_ip or "127.0.0.1")
     agent_connection_metadata[payload.agent_id] = {
-        "ip": source_ip,
+        "ip": client_ip,
         "os": data.get("os") or data.get("platform") or "Unknown",
         "last_seen": now,
     }
+    data["ip"] = client_ip
     silence_detector.record_heartbeat(data)
-    await broadcast({**data, "type": "agent_heartbeat"})
-    return {"status": "ok", "agent_id": payload.agent_id}
+    await broadcast({**data, "ip": client_ip, "type": "agent_heartbeat"})
+    return {"status": "ok", "agent_id": payload.agent_id, "ip": client_ip}
 
 
 @app.post("/api/heartbeat/shutdown")
@@ -557,8 +571,14 @@ async def post_heartbeat_shutdown(
 
 @app.get("/api/agents")
 async def get_agents():
-    """Full snapshot of every tracked agent's heartbeat state."""
-    return {"agents": silence_detector.list_agents()}
+    """Full snapshot of every tracked agent's heartbeat state with IP and OS."""
+    agents = silence_detector.list_agents()
+    for a in agents:
+        aid = a.get("agent_id")
+        meta = agent_connection_metadata.get(aid, {})
+        a["ip"] = meta.get("ip") or a.get("ip") or "127.0.0.1"
+        a["os"] = meta.get("os") or "Unknown"
+    return {"agents": agents}
 
 
 @app.get("/api/agents/{agent_id}/trust")
@@ -783,6 +803,7 @@ async def get_centralized_telemetry(
                     {
                         "id": r.event_uid,
                         "agent_id": r.agent_id,
+                        "ip": agent_connection_metadata.get(r.agent_id, {}).get("ip") or (r.payload.get("ip") if isinstance(r.payload, dict) else None) or "127.0.0.1",
                         "event_type": r.event_type,
                         "threat_score": r.threat_score,
                         "verdict": r.verdict,
@@ -800,6 +821,10 @@ async def get_centralized_telemetry(
         telemetries = central_repo.query_telemetry(
             agent_id=agent_id, event_type=event_type, min_score=min_score, limit=limit
         )
+        for t in telemetries:
+            aid = t.get("agent_id")
+            if not t.get("ip"):
+                t["ip"] = agent_connection_metadata.get(aid, {}).get("ip") or "127.0.0.1"
         return {"telemetries": telemetries, "count": len(telemetries), "source": "memory"}
 
 

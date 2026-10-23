@@ -42,12 +42,32 @@ Design Decisions
 from __future__ import annotations
 
 import logging
+import socket
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, List
 
 import psutil
+
+# ---------------------------------------------------------------------------
+# Network Helpers
+# ---------------------------------------------------------------------------
+def get_local_ip() -> str:
+    """Detect LAN/local IP address of this machine."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.2)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
+
 
 # ---------------------------------------------------------------------------
 # Logging Setup
@@ -80,6 +100,8 @@ class AgentState:
     alarm_raised : bool
         True if a silent alarm has already been fired for this agent's current
         silence episode (used for alarm suppression).
+    ip : str
+        Observed machine IP address.
     """
 
     agent_id: str
@@ -87,6 +109,7 @@ class AgentState:
     status: str = "healthy"
     cpu: float = 0.0
     alarm_raised: bool = False
+    ip: str = "127.0.0.1"
 
 
 # ===========================================================================
@@ -180,6 +203,7 @@ class HeartbeatEmitter:
             "status": status,
             "cpu": cpu_usage,
             "timestamp": now_ts,
+            "ip": get_local_ip(),
         }
 
     def _run_loop(self) -> None:
@@ -338,6 +362,7 @@ class SilenceDetector:
                 )
                 return
 
+            agent_ip = str(payload.get("ip") or "127.0.0.1")
             if agent_id in self._agents:
                 agent = self._agents[agent_id]
                 if agent.alarm_raised or agent.status == "OFFLINE_GRACEFUL":
@@ -348,6 +373,7 @@ class SilenceDetector:
                 agent.last_seen = now
                 agent.status = status
                 agent.cpu = cpu
+                agent.ip = agent_ip
                 agent.alarm_raised = False  # Re-arm silence alarm for future dropouts
             else:
                 self._agents[agent_id] = AgentState(
@@ -356,6 +382,7 @@ class SilenceDetector:
                     status=status,
                     cpu=cpu,
                     alarm_raised=False,
+                    ip=agent_ip,
                 )
                 logger.info("[SilenceDetector] Registered new agent tracking for '%s'", agent_id)
 
@@ -516,6 +543,7 @@ class SilenceDetector:
                     "status": agent.status,
                     "cpu": agent.cpu,
                     "alarm_raised": agent.alarm_raised,
+                    "ip": getattr(agent, "ip", "127.0.0.1"),
                 }
                 for agent in self._agents.values()
             ]
