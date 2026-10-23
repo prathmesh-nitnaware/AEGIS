@@ -177,7 +177,7 @@ class LinuxTelemetryCollector:
                 import socket
                 import urllib.request
 
-                cmd_url = os.environ.get("COMMAND_NODE_URL", "http://172.16.244.124:8000").rstrip("/")
+                cmd_url = os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000").rstrip("/")
                 req = urllib.request.Request(
                     f"{cmd_url}/api/telemetry",
                     data=json.dumps(event).encode("utf-8"),

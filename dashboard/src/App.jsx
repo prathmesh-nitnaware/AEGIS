@@ -35,6 +35,8 @@ import {
   Lock,
   Key,
   UserCheck,
+  ArrowRight,
+  ArrowLeft,
 } from "lucide-react";
 import {
   AreaChart,
@@ -1547,271 +1549,272 @@ export default function App() {
         {/* ═══ TAB: LIVE PEER VOTING & TELEMETRY TABLE ═══ */}
         {activeTab === "peer_voting" && (
           <section className="content-grid" style={{ display: "block" }}>
-            {selectedTelemetryForVoting ? (
-              <LivePeerVotingVisualization
-                liveVerdicts={verdicts}
-                selectedTelemetry={selectedTelemetryForVoting}
-                onBack={() => setSelectedTelemetryForVoting(null)}
-              />
-            ) : (
-              <div className="panel full-width">
-                <div className="panel-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <h3 className="panel-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <Network size={18} style={{ color: "#38bdf8" }} />
-                      Live Peer Voting Telemetry
-                    </h3>
-                    <p className="panel-subtitle">
-                      Active endpoint telemetry records and P2P Byzantine consensus verdicts. Click any telemetry row to view the distributed peer-voting mesh visualization.
-                    </p>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <LivePeerVotingVisualization
+              liveVerdicts={verdicts}
+              selectedTelemetry={selectedTelemetryForVoting}
+              onBack={selectedTelemetryForVoting ? () => setSelectedTelemetryForVoting(null) : null}
+            />
+
+            <div className="panel full-width" style={{ marginTop: 20 }}>
+              <div className="panel-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <h3 className="panel-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Network size={18} style={{ color: "#38bdf8" }} />
+                    Live Peer Voting Telemetry Feed
+                  </h3>
+                  <p className="panel-subtitle">
+                    Active endpoint telemetry records and P2P Byzantine consensus verdicts. Click any telemetry row to view its distributed peer-voting correlation above.
+                  </p>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <button
+                    className="btn-badge-chip"
+                    onClick={() => {
+                      fetchTelemetry();
+                      fetchVerdicts();
+                    }}
+                    disabled={isTelemetryLoading}
+                    title="Refresh telemetry and verdict records"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                  >
+                    <RefreshCw size={13} className={isTelemetryLoading ? "spin-icon" : ""} />
+                    {isTelemetryLoading ? "Refreshing..." : "Refresh"}
+                  </button>
+                  {selectedTelemetryForVoting && (
                     <button
                       className="btn-badge-chip"
-                      onClick={() => {
-                        fetchTelemetry();
-                        fetchVerdicts();
-                      }}
-                      disabled={isTelemetryLoading}
-                      title="Refresh telemetry and verdict records"
-                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                      onClick={() => setSelectedTelemetryForVoting(null)}
+                      style={{ color: "#38bdf8", borderColor: "rgba(56, 189, 248, 0.4)" }}
+                      title="Reset visualization to general peer topology"
                     >
-                      <RefreshCw size={13} className={isTelemetryLoading ? "spin-icon" : ""} />
-                      {isTelemetryLoading ? "Refreshing..." : "Refresh"}
+                      Reset to General Topology
                     </button>
-                    <button
-                      className="btn-primary"
-                      onClick={() => setSelectedTelemetryForVoting({ isDemoMesh: true, name: "Simulated Mesh Topology" })}
-                      style={{ padding: "6px 14px", fontSize: 12 }}
-                      title="Inspect interactive preview topology"
-                    >
-                      Open Full Topology
-                    </button>
-                  </div>
+                  )}
                 </div>
+              </div>
 
-                <div className="table-wrapper" style={{ marginTop: 14 }}>
-                  {(() => {
-                    // Combine backend telemetry records with live processes and verdicts
-                    const combinedRows = [];
-                    const seenKeys = new Set();
+              <div className="table-wrapper" style={{ marginTop: 14 }}>
+                {(() => {
+                  // Combine backend telemetry records with live processes and verdicts
+                  const combinedRows = [];
+                  const seenKeys = new Set();
 
-                    // 1. Backend stored/live telemetries
-                    telemetryRecords.forEach((item) => {
-                      const payload = item.payload || {};
-                      const pid = payload.pid ?? item.pid ?? (typeof payload.process_id === "number" ? payload.process_id : null);
-                      const tName = item.event_type || payload.process || payload.process_name || payload.model || "System Telemetry";
-                      const score = typeof item.threat_score === "number" ? item.threat_score : (typeof payload.threat_score === "number" ? payload.threat_score : 0.0);
-                      const key = `${tName}-${pid ?? item.id}`;
+                  // 1. Backend stored/live telemetries
+                  telemetryRecords.forEach((item) => {
+                    const payload = item.payload || {};
+                    const pid = payload.pid ?? item.pid ?? (typeof payload.process_id === "number" ? payload.process_id : null);
+                    const tName = item.event_type || payload.process || payload.process_name || payload.model || "System Telemetry";
+                    const score = typeof item.threat_score === "number" ? item.threat_score : (typeof payload.threat_score === "number" ? payload.threat_score : 0.0);
+                    const key = `${tName}-${pid ?? item.id}`;
+                    seenKeys.add(key);
+
+                    // Match associated verdict if available
+                    const matchedVerdict = verdicts.find(
+                      (v) => (v && v.details && v.details.pid === pid) || (v && v.event_type === item.event_type) || (v && v.origin_agent_id === item.agent_id)
+                    );
+
+                    const verdictText = matchedVerdict
+                      ? (matchedVerdict.severity || matchedVerdict.verdict_type || "CONSENSUS_VERDICT")
+                      : (item.verdict || (score >= 0.75 ? "CRITICAL" : score >= 0.5 ? "SUSPICIOUS" : "NORMAL"));
+
+                    const votingStatus = matchedVerdict
+                      ? (matchedVerdict.consensus_reached ? "QUORUM_REACHED" : "PARTIAL_QUORUM")
+                      : (score >= 0.5 ? "VOTING_IN_PROGRESS" : "VERIFIED_BENIGN");
+
+                    combinedRows.push({
+                      id: item.id || key,
+                      name: tName,
+                      pid: pid,
+                      agent_id: item.agent_id || "agent-linux-01",
+                      threat_score: score,
+                      peer_voting_verdict: verdictText,
+                      voting_status: votingStatus,
+                      timestamp: item.received_at || payload.timestamp || new Date().toISOString(),
+                      target: payload.process || payload.file_path || payload.target_file || tName,
+                      verdict_obj: matchedVerdict || null,
+                    });
+                  });
+
+                  // 2. Active processes in memory from live stream
+                  processes.forEach((proc) => {
+                    const key = `${proc.process}-${proc.pid}`;
+                    if (!seenKeys.has(key)) {
                       seenKeys.add(key);
-
-                      // Match associated verdict if available
                       const matchedVerdict = verdicts.find(
-                        (v) => (v.details && v.details.pid === pid) || v.event_type === item.event_type || v.origin_agent_id === item.agent_id
+                        (v) => (v && v.details && v.details.pid === proc.pid) || (v && v.event_type === proc.process)
                       );
 
                       const verdictText = matchedVerdict
-                        ? (matchedVerdict.severity || matchedVerdict.verdict_type || "CONSENSUS_VERDICT")
-                        : (item.verdict || (score >= 0.75 ? "CRITICAL" : score >= 0.5 ? "SUSPICIOUS" : "NORMAL"));
+                        ? (matchedVerdict.severity || matchedVerdict.verdict_type)
+                        : (proc.predicted_class || (proc.threat_score >= 0.75 ? "CRITICAL" : proc.threat_score >= 0.5 ? "SUSPICIOUS" : "NORMAL"));
 
                       const votingStatus = matchedVerdict
                         ? (matchedVerdict.consensus_reached ? "QUORUM_REACHED" : "PARTIAL_QUORUM")
-                        : (score >= 0.5 ? "VOTING_IN_PROGRESS" : "VERIFIED_BENIGN");
+                        : (proc.threat_score >= 0.5 ? "VOTING_IN_PROGRESS" : "VERIFIED_BENIGN");
 
                       combinedRows.push({
-                        id: item.id || key,
-                        name: tName,
-                        pid: pid,
-                        agent_id: item.agent_id || "agent-linux-01",
-                        threat_score: score,
+                        id: `proc-${proc.pid}-${proc.process}`,
+                        name: proc.process,
+                        pid: proc.pid,
+                        agent_id: proc.agent_id || "agent-node-01",
+                        threat_score: proc.threat_score,
                         peer_voting_verdict: verdictText,
                         voting_status: votingStatus,
-                        timestamp: item.received_at || payload.timestamp || new Date().toISOString(),
-                        target: payload.process || payload.file_path || payload.target_file || tName,
+                        timestamp: proc.timestamp ? new Date(proc.timestamp * 1000).toISOString() : new Date().toISOString(),
+                        target: proc.process,
                         verdict_obj: matchedVerdict || null,
                       });
-                    });
+                    }
+                  });
 
-                    // 2. Active processes in memory from live stream
-                    processes.forEach((proc) => {
-                      const key = `${proc.process}-${proc.pid}`;
-                      if (!seenKeys.has(key)) {
-                        seenKeys.add(key);
-                        const matchedVerdict = verdicts.find(
-                          (v) => (v.details && v.details.pid === proc.pid) || v.event_type === proc.process
-                        );
-
-                        const verdictText = matchedVerdict
-                          ? (matchedVerdict.severity || matchedVerdict.verdict_type)
-                          : (proc.predicted_class || (proc.threat_score >= 0.75 ? "CRITICAL" : proc.threat_score >= 0.5 ? "SUSPICIOUS" : "NORMAL"));
-
-                        const votingStatus = matchedVerdict
-                          ? (matchedVerdict.consensus_reached ? "QUORUM_REACHED" : "PARTIAL_QUORUM")
-                          : (proc.threat_score >= 0.5 ? "VOTING_IN_PROGRESS" : "VERIFIED_BENIGN");
-
-                        combinedRows.push({
-                          id: `proc-${proc.pid}-${proc.process}`,
-                          name: proc.process,
-                          pid: proc.pid,
-                          agent_id: "agent-node-01",
-                          threat_score: proc.threat_score,
-                          peer_voting_verdict: verdictText,
-                          voting_status: votingStatus,
-                          timestamp: proc.timestamp ? new Date(proc.timestamp * 1000).toISOString() : new Date().toISOString(),
-                          target: proc.process,
-                          verdict_obj: matchedVerdict || null,
-                        });
-                      }
-                    });
-
-                    // 3. Fallback: historical verdicts from NeonDB
-                    if (combinedRows.length === 0 && verdicts.length > 0) {
-                      verdicts.forEach((v) => {
-                        const pid = v.details?.pid ?? (v.target_pid || null);
-                        combinedRows.push({
-                          id: v.vote_id,
-                          name: v.event_type || "Telemetry Event",
-                          pid: pid,
-                          agent_id: v.origin_agent_id || "agent-linux",
-                          threat_score: v.final_weighted_score ?? v.raw_threat_score ?? 0.0,
-                          peer_voting_verdict: v.severity || (v.consensus_reached ? "CONSENSUS_REACHED" : "EVALUATED"),
-                          voting_status: v.consensus_reached ? "QUORUM_REACHED" : "PARTIAL_QUORUM",
-                          timestamp: v.timestamp ? (typeof v.timestamp === "number" ? new Date(v.timestamp * 1000).toISOString() : v.timestamp) : new Date().toISOString(),
-                          target: v.event_type,
-                          verdict_obj: v,
-                        });
+                  // 3. Fallback: historical verdicts from NeonDB
+                  if (combinedRows.length === 0 && verdicts.length > 0) {
+                    verdicts.forEach((v) => {
+                      if (!v) return;
+                      const pid = v.details?.pid ?? (v.target_pid || null);
+                      combinedRows.push({
+                        id: v.vote_id,
+                        name: v.event_type || "Telemetry Event",
+                        pid: pid,
+                        agent_id: v.origin_agent_id || "agent-linux",
+                        threat_score: v.final_weighted_score ?? v.raw_threat_score ?? 0.0,
+                        peer_voting_verdict: v.severity || (v.consensus_reached ? "CONSENSUS_REACHED" : "EVALUATED"),
+                        voting_status: v.consensus_reached ? "QUORUM_REACHED" : "PARTIAL_QUORUM",
+                        timestamp: v.timestamp ? (typeof v.timestamp === "number" ? new Date(v.timestamp * 1000).toISOString() : v.timestamp) : new Date().toISOString(),
+                        target: v.event_type,
+                        verdict_obj: v,
                       });
-                    }
+                    });
+                  }
 
-                    if (combinedRows.length === 0) {
-                      return (
-                        <div className="empty-table-placeholder" style={{ padding: "40px 20px" }}>
-                          <Network size={36} className="muted-icon" style={{ color: "#38bdf8", opacity: 0.7 }} />
-                          <p style={{ marginTop: 12, fontSize: 15, fontWeight: 600 }}>Awaiting Telemetry Ingress</p>
-                          <span style={{ fontSize: 13, color: "#64748b" }}>
-                            Trigger a test telemetry pulse or wait for live Linux/Windows agent events. Click "Open Full Topology" to inspect the Byzantine consensus canvas anytime.
-                          </span>
-                        </div>
-                      );
-                    }
-
+                  if (combinedRows.length === 0) {
                     return (
-                      <table className="aegis-table">
-                        <thead>
-                          <tr>
-                            <th>Telemetry Name</th>
-                            <th>PID</th>
-                            <th>Threat Score</th>
-                            <th>Peer Voting Verdict</th>
-                            <th>Voting Status</th>
-                            <th>Timestamp</th>
-                            <th style={{ textAlign: "right" }}>Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {combinedRows.map((row) => {
-                            const threatColor = getThreatColor(row.threat_score);
-                            const isQuorumReached = row.voting_status === "QUORUM_REACHED" || row.voting_status === "CONSENSUS_REACHED";
-                            const isPending = row.voting_status === "VOTING_IN_PROGRESS" || row.voting_status === "PARTIAL_QUORUM";
-
-                            return (
-                              <tr
-                                key={row.id}
-                                onClick={() => setSelectedTelemetryForVoting(row)}
-                                style={{ cursor: "pointer", transition: "background 0.15s ease" }}
-                                className="telemetry-clickable-row"
-                                title="Click to view distributed peer voting visualization for this record"
-                              >
-                                <td>
-                                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: threatColor }} />
-                                    <strong>{row.name}</strong>
-                                    {row.agent_id && (
-                                      <span style={{ fontSize: 10, color: "#64748b", background: "#0b111b", padding: "1px 5px", borderRadius: 3 }}>
-                                        {row.agent_id}
-                                      </span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td>
-                                  <code>{row.pid !== null && row.pid !== undefined ? row.pid : "N/A"}</code>
-                                </td>
-                                <td>
-                                  <span
-                                    className="threat-pill"
-                                    style={{
-                                      background: `${threatColor}1f`,
-                                      color: threatColor,
-                                      borderColor: `${threatColor}55`,
-                                      display: "inline-block",
-                                      fontWeight: 700,
-                                      padding: "2px 8px",
-                                      borderRadius: 4,
-                                      border: "1px solid",
-                                    }}
-                                  >
-                                    {((row.threat_score || 0) * 100).toFixed(1)}%
-                                  </span>
-                                </td>
-                                <td>
-                                  <span
-                                    className={`verdict-badge ${row.peer_voting_verdict === "LOW" || row.peer_voting_verdict === "NORMAL" || row.peer_voting_verdict === "VERIFIED_BENIGN" ? "normal" : "alert"}`}
-                                  >
-                                    {row.peer_voting_verdict}
-                                  </span>
-                                </td>
-                                <td>
-                                  <span
-                                    style={{
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      gap: 6,
-                                      fontSize: 11,
-                                      fontWeight: 600,
-                                      padding: "3px 8px",
-                                      borderRadius: 12,
-                                      background: isQuorumReached ? "rgba(16, 185, 129, 0.15)" : isPending ? "rgba(56, 189, 248, 0.15)" : "rgba(100, 116, 139, 0.15)",
-                                      color: isQuorumReached ? "#10b981" : isPending ? "#38bdf8" : "#94a3b8",
-                                      border: `1px solid ${isQuorumReached ? "rgba(16, 185, 129, 0.3)" : isPending ? "rgba(56, 189, 248, 0.3)" : "rgba(100, 116, 139, 0.3)"}`,
-                                    }}
-                                  >
-                                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: isQuorumReached ? "#10b981" : isPending ? "#38bdf8" : "#94a3b8" }} />
-                                    {row.voting_status}
-                                  </span>
-                                </td>
-                                <td style={{ fontSize: 12, color: "#94a3b8", fontFamily: "JetBrains Mono, monospace" }}>
-                                  {typeof row.timestamp === "string" && row.timestamp.includes("T")
-                                    ? row.timestamp.replace("T", " ").slice(0, 19)
-                                    : row.timestamp}
-                                </td>
-                                <td style={{ textAlign: "right" }}>
-                                  <button
-                                    className="btn-badge-chip"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedTelemetryForVoting(row);
-                                    }}
-                                    style={{
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      gap: 4,
-                                      borderColor: "rgba(56, 189, 248, 0.4)",
-                                      color: "#38bdf8",
-                                    }}
-                                  >
-                                    View Voting <ArrowRight size={12} />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                      <div className="empty-table-placeholder" style={{ padding: "30px 20px" }}>
+                        <Network size={30} className="muted-icon" style={{ color: "#38bdf8", opacity: 0.7 }} />
+                        <p style={{ marginTop: 10, fontSize: 14, fontWeight: 600 }}>Awaiting Telemetry Ingress</p>
+                        <span style={{ fontSize: 12, color: "#64748b" }}>
+                          Trigger a test telemetry pulse or run endpoint agents to populate live records. The peer consensus mesh visualization above is active and interactive.
+                        </span>
+                      </div>
                     );
-                  })()}
-                </div>
+                  }
+
+                  return (
+                    <table className="aegis-table">
+                      <thead>
+                        <tr>
+                          <th>Telemetry Name</th>
+                          <th>PID</th>
+                          <th>Threat Score</th>
+                          <th>Peer Voting Verdict</th>
+                          <th>Voting Status</th>
+                          <th>Timestamp</th>
+                          <th style={{ textAlign: "right" }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {combinedRows.map((row) => {
+                          const threatColor = getThreatColor(row.threat_score);
+                          const isQuorumReached = row.voting_status === "QUORUM_REACHED" || row.voting_status === "CONSENSUS_REACHED";
+                          const isPending = row.voting_status === "VOTING_IN_PROGRESS" || row.voting_status === "PARTIAL_QUORUM";
+
+                          return (
+                            <tr
+                              key={row.id}
+                              onClick={() => setSelectedTelemetryForVoting(row)}
+                              style={{ cursor: "pointer", transition: "background 0.15s ease" }}
+                              className="telemetry-clickable-row"
+                              title="Click to view distributed peer voting visualization for this record"
+                            >
+                              <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: threatColor }} />
+                                  <strong>{row.name}</strong>
+                                  {row.agent_id && (
+                                    <span style={{ fontSize: 10, color: "#64748b", background: "#0b111b", padding: "1px 5px", borderRadius: 3 }}>
+                                      {row.agent_id}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                <code>{row.pid !== null && row.pid !== undefined ? row.pid : "N/A"}</code>
+                              </td>
+                              <td>
+                                <span
+                                  className="threat-pill"
+                                  style={{
+                                    background: `${threatColor}1f`,
+                                    color: threatColor,
+                                    borderColor: `${threatColor}55`,
+                                    display: "inline-block",
+                                    fontWeight: 700,
+                                    padding: "2px 8px",
+                                    borderRadius: 4,
+                                    border: "1px solid",
+                                  }}
+                                >
+                                  {((row.threat_score || 0) * 100).toFixed(1)}%
+                                </span>
+                              </td>
+                              <td>
+                                <span
+                                  className={`verdict-badge ${row.peer_voting_verdict === "LOW" || row.peer_voting_verdict === "NORMAL" || row.peer_voting_verdict === "VERIFIED_BENIGN" ? "normal" : "alert"}`}
+                                >
+                                  {row.peer_voting_verdict}
+                                </span>
+                              </td>
+                              <td>
+                                <span
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    padding: "3px 8px",
+                                    borderRadius: 12,
+                                    background: isQuorumReached ? "rgba(16, 185, 129, 0.15)" : isPending ? "rgba(56, 189, 248, 0.15)" : "rgba(100, 116, 139, 0.15)",
+                                    color: isQuorumReached ? "#10b981" : isPending ? "#38bdf8" : "#94a3b8",
+                                    border: `1px solid ${isQuorumReached ? "rgba(16, 185, 129, 0.3)" : isPending ? "rgba(56, 189, 248, 0.3)" : "rgba(100, 116, 139, 0.3)"}`,
+                                  }}
+                                >
+                                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: isQuorumReached ? "#10b981" : isPending ? "#38bdf8" : "#94a3b8" }} />
+                                  {row.voting_status}
+                                </span>
+                              </td>
+                              <td style={{ fontSize: 12, color: "#94a3b8", fontFamily: "JetBrains Mono, monospace" }}>
+                                {typeof row.timestamp === "string" && row.timestamp.includes("T")
+                                  ? row.timestamp.replace("T", " ").slice(0, 19)
+                                  : row.timestamp}
+                              </td>
+                              <td style={{ textAlign: "right" }}>
+                                <button
+                                  className="btn-badge-chip"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedTelemetryForVoting(row);
+                                  }}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                    borderColor: "rgba(56, 189, 248, 0.4)",
+                                    color: "#38bdf8",
+                                  }}
+                                >
+                                  Inspect In Mesh <ArrowRight size={12} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  );
+                })()}
               </div>
-            )}
+            </div>
           </section>
         )}
 

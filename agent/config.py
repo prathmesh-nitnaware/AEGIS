@@ -56,7 +56,7 @@ class AegisAgentConfig:
 
     # Node Identity & Central Server
     agent_id: str = field(default_factory=lambda: os.environ.get("AGENT_ID", socket.gethostname()))
-    command_node_url: str = field(default_factory=lambda: os.environ.get("COMMAND_NODE_URL", "http://172.16.244.124:8000"))
+    command_node_url: str = field(default_factory=lambda: os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000"))
     
     # Heartbeat & Silence-as-Alarm Thresholds
     heartbeat_interval: float = field(default_factory=lambda: float(os.environ.get("HEARTBEAT_INTERVAL", "5.0")))
@@ -114,8 +114,8 @@ class AegisAgentConfig:
         # Check local .env files if COMMAND_NODE_URL was not set in os.environ
         if "COMMAND_NODE_URL" not in os.environ:
             for env_candidate in [
-                Path(__file__).resolve().parent.parent / ".env",
                 Path(__file__).resolve().parent / ".env",
+                Path(__file__).resolve().parent.parent / ".env",
             ]:
                 if env_candidate.exists():
                     try:
@@ -126,6 +126,11 @@ class AegisAgentConfig:
                                     val = eline.split("=", 1)[1].strip().strip('"\'')
                                     if val:
                                         cfg.command_node_url = val
+                                        break
+                                elif eline.startswith("MAIN_SERVER_IP="):
+                                    val = eline.split("=", 1)[1].strip().strip('"\'')
+                                    if val:
+                                        cfg.command_node_url = f"http://{val}:8000"
                                         break
                     except Exception:
                         pass

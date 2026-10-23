@@ -18,7 +18,8 @@ LOG_DIR="/var/log/aegis"
 QUARANTINE_DIR="/var/lib/aegis/quarantine"
 SERVICE_FILE="/etc/systemd/system/aegis-agent.service"
 
-COMMAND_NODE_URL="http://172.16.244.124:8000"
+COMMAND_NODE_URL="${COMMAND_NODE_URL:-${MAIN_SERVER_IP:+http://${MAIN_SERVER_IP}:8000}}"
+COMMAND_NODE_URL="${COMMAND_NODE_URL:-http://127.0.0.1:8000}"
 AGENT_ID=$(hostname)
 NON_INTERACTIVE=false
 
@@ -31,7 +32,7 @@ while [[ "$#" -gt 0 ]]; do
         --help|-h)
             echo "Usage: sudo ./install.sh [OPTIONS]"
             echo "Options:"
-            echo "  --server URL       Command Node URL (default: http://172.16.244.124:8000)"
+            echo "  --server URL       Command Node URL (default: http://127.0.0.1:8000)"
             echo "  --agent-id ID      Unique Node Identifier (default: hostname)"
             echo "  --non-interactive  Run without prompting"
             exit 0

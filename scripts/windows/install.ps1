@@ -4,7 +4,7 @@
 # ===========================================================================
 
 param (
-    [string]$CommandNodeUrl = "http://172.16.244.124:8000",
+    [string]$CommandNodeUrl = $(if ($env:COMMAND_NODE_URL) { $env:COMMAND_NODE_URL } elseif ($env:MAIN_SERVER_IP) { "http://$($env:MAIN_SERVER_IP):8000" } else { "http://127.0.0.1:8000" }),
     [string]$AgentId = $env:COMPUTERNAME,
     [string]$InstallDir = "C:\Program Files\AEGIS Agent",
     [string]$DataDir = "C:\ProgramData\AEGIS"

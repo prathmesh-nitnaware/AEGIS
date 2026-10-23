@@ -23,6 +23,10 @@ import {
   ExternalLink,
 } from "lucide-react";
 
+const API_BASE = typeof window !== "undefined"
+  ? `${window.location.protocol}//${window.location.hostname || "127.0.0.1"}:8000`
+  : "http://127.0.0.1:8000";
+
 // ============================================================================
 // CURATED SAMPLE SCENARIOS (Clearly designated for Testing / UI Demo Mode)
 // ============================================================================
@@ -405,7 +409,7 @@ export default function LivePeerVotingVisualization({
   const checkLiveApi = async () => {
     setLiveApiState((prev) => ({ ...prev, loading: true, error: null }));
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/voting/latest", { cache: "no-store" });
+      const res = await fetch(`${API_BASE}/api/voting/latest`, { cache: "no-store" });
       if (res.ok) {
         const json = await res.json();
         if (json && json.verdict) {
@@ -435,7 +439,7 @@ export default function LivePeerVotingVisualization({
       setLiveApiState({
         data: null,
         loading: false,
-        error: "Backend unreachable on http://127.0.0.1:8000. Switch to Preview Mode to interact with sample topologies.",
+        error: `Backend unreachable on ${API_BASE}. Switch to Preview Mode to interact with sample topologies.`,
         lastChecked: new Date().toLocaleTimeString(),
       });
     }

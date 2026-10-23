@@ -65,6 +65,35 @@ _PROJECT_ROOT = _HERE.parent                      # .../AEGIS/
 sys.path.insert(0, str(_HERE))
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+
+def load_env_file(path: Path) -> None:
+    """Safely loads an environment file into os.environ without overriding existing env vars."""
+    if not path.is_file():
+        return
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(path, override=False)
+        return
+    except ImportError:
+        pass
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k not in os.environ:
+                os.environ[k] = v
+    except Exception:
+        pass
+
+
+# Load local agent/.env and root .env before reading configs
+load_env_file(_HERE / ".env")
+load_env_file(_PROJECT_ROOT / ".env")
+
 from fusion_engine import ThreatFusionEngine  # noqa: E402
 from live_collectors import (  # noqa: E402
     ZeroDayEventCollector,
@@ -132,7 +161,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--command-node", "--server", dest="command_node_url", default=None,
-    help="URL of central command node (default: COMMAND_NODE_URL or http://172.16.244.124:8000).",
+    help="URL of central command node (default: COMMAND_NODE_URL or http://127.0.0.1:8000).",
 )
 parser.add_argument(
     "--no-ip-prompt", dest="no_ip_prompt", action="store_true", default=False,
@@ -154,33 +183,6 @@ def clean_server_url(raw_input: str) -> str:
     return f"{parsed.scheme}://{host}:{port}"
 
 
-def prompt_server_url(default_url: str) -> str:
-    """Prompt the user for the Main Server IP address when starting the agent."""
-    parsed = urllib.parse.urlsplit(default_url)
-    default_host = parsed.hostname or "127.0.0.1"
-
-    print("\n" + "=" * 80)
-    print("      AEGIS ENDPOINT AGENT — OS-AWARE TELEMETRY & THREAT DEFENSE")
-    print("=" * 80)
-    print(f"  Target Main Server:  {default_url}")
-    print("  This agent will stream live ML telemetry, verdicts, and heartbeats to this server.")
-    print("-" * 80)
-
-    if not sys.stdin.isatty():
-        return default_url
-
-    try:
-        raw = input(f"[?] Enter Main Server IP address [Press ENTER for {default_host}]: ").strip()
-        if not raw:
-            print(f"[+] Using Main Server: {default_url}")
-            return default_url
-        cleaned = clean_server_url(raw)
-        print(f"[+] Configured Main Server URL: {cleaned}")
-        return cleaned
-    except (EOFError, KeyboardInterrupt):
-        return default_url
-
-
 def test_server_connectivity(server_url: str) -> bool:
     """Test reachability to the central Command Node API health endpoint."""
     print(f"[*] Verifying connectivity to Main Server at {server_url}/api/health ...")
@@ -197,32 +199,22 @@ def test_server_connectivity(server_url: str) -> bool:
 
 
 def save_agent_server_url(server_url: str) -> None:
-    """Persist configured server URL into local agent.conf and config.py defaults."""
+    """Persist configured server URL into local agent/.env (gitignored)."""
     try:
-        conf_file = _HERE / "agent.conf"
-        data = {}
-        if conf_file.exists():
-            try:
-                data = json.loads(conf_file.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-        data["command_node_url"] = server_url
-        conf_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except Exception:
-        pass
-
-    try:
-        cfg_file = _HERE / "config.py"
-        if cfg_file.exists():
-            content = cfg_file.read_text(encoding="utf-8")
-            import re
-            new_content = re.sub(
-                r'command_node_url:\s*str\s*=\s*field\(default_factory=lambda:\s*os\.environ\.get\("COMMAND_NODE_URL",\s*"http://[^"]+?"\)\)',
-                f'command_node_url: str = field(default_factory=lambda: os.environ.get("COMMAND_NODE_URL", "{server_url}"))',
-                content,
-            )
-            if new_content != content:
-                cfg_file.write_text(new_content, encoding="utf-8")
+        env_file = _HERE / ".env"
+        existing = env_file.read_text(encoding="utf-8") if env_file.exists() else ""
+        lines = [
+            l for l in existing.splitlines()
+            if not any(l.startswith(k) for k in ("COMMAND_NODE_URL=", "MAIN_SERVER_IP="))
+        ]
+        parsed = urllib.parse.urlsplit(server_url)
+        ip = parsed.hostname or "127.0.0.1"
+        lines.extend([
+            f"MAIN_SERVER_IP={ip}",
+            f"COMMAND_NODE_URL={server_url}",
+        ])
+        env_file.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+        print(f"[*] Saved configured server to agent/.env (gitignored)")
     except Exception:
         pass
 
@@ -230,14 +222,21 @@ def save_agent_server_url(server_url: str) -> None:
 default_target = (
     args.command_node_url
     or os.environ.get("COMMAND_NODE_URL")
-    or "http://172.16.244.124:8000"
+    or (f"http://{os.environ.get('MAIN_SERVER_IP')}:8000" if os.environ.get("MAIN_SERVER_IP") else None)
+    or "http://127.0.0.1:8000"
 )
 
-if not args.no_ip_prompt and not args.command_node_url:
-    COMMAND_NODE_URL = prompt_server_url(default_target)
+COMMAND_NODE_URL = clean_server_url(default_target)
+
+print("\n" + "=" * 80)
+print("      AEGIS ENDPOINT AGENT — OS-AWARE TELEMETRY & THREAT DEFENSE")
+print("=" * 80)
+print(f"  Target Main Server:  {COMMAND_NODE_URL}")
+print("  This agent will stream live ML telemetry, verdicts, and heartbeats to this server.")
+print("-" * 80)
+
+if args.command_node_url:
     save_agent_server_url(COMMAND_NODE_URL)
-else:
-    COMMAND_NODE_URL = clean_server_url(default_target)
 
 test_server_connectivity(COMMAND_NODE_URL)
 os.environ["COMMAND_NODE_URL"] = COMMAND_NODE_URL
@@ -272,7 +271,7 @@ if getattr(args, "p2p_port", 0) > 0:
             agent_id=getattr(args, "agent_id", "agent-host-local"),
             bind_port=args.p2p_port,
             command_node_url=getattr(
-                args, "command_node_url", os.environ.get("COMMAND_NODE_URL", "http://172.16.244.124:8000")),
+                args, "command_node_url", os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000")),
         )
         _p2p_node.start()
         peers_str = getattr(args, "p2p_peers", "") or os.environ.get("P2P_PEERS", "")
