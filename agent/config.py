@@ -56,7 +56,7 @@ class AegisAgentConfig:
 
     # Node Identity & Central Server
     agent_id: str = field(default_factory=lambda: os.environ.get("AGENT_ID", socket.gethostname()))
-    command_node_url: str = field(default_factory=lambda: os.environ.get("COMMAND_NODE_URL", "http://127.0.0.1:8000"))
+    command_node_url: str = field(default_factory=lambda: os.environ.get("COMMAND_NODE_URL", "http://172.16.244.124:8000"))
     
     # Heartbeat & Silence-as-Alarm Thresholds
     heartbeat_interval: float = field(default_factory=lambda: float(os.environ.get("HEARTBEAT_INTERVAL", "5.0")))

@@ -167,8 +167,10 @@ else:
     allowed_origins = [
         "http://localhost:3000",
         "http://localhost:5173",
+        "http://localhost:5174",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
     ]
 
 app.add_middleware(
@@ -1544,28 +1546,9 @@ async def export_incident_report_pdf(incident_id: str = "INC-CURRENT-001"):
 
 @app.get("/api/attack/targets")
 async def get_attack_targets_endpoint():
-    """Return only agents actually seen through the heartbeat endpoint."""
-    now = time.time()
-    rows = silence_detector.list_agents()
-    targets = []
-    for row in rows:
-        aid = row.get("agent_id")
-        meta = agent_connection_metadata.get(aid, {})
-        age = float(row.get("silence_duration", now - float(row.get("last_seen", 0))))
-        status = str(row.get("status", "unknown")).upper()
-        online = age <= silence_detector.silence_threshold and status not in {"OFFLINE_GRACEFUL", "OFFLINE", "DISCONNECTED"}
-        targets.append({
-            "id": aid,
-            "name": f"AEGIS Agent {aid}",
-            "os": meta.get("os", "Unknown"),
-            "ip": meta.get("ip") or "Unknown (source address unavailable)",
-            "last_seen": row.get("last_seen"),
-            "silence_duration": age,
-            "services": ["AEGIS telemetry"],
-            "status": "ONLINE" if online else ("ALARMED" if row.get("alarm_raised") else "OFFLINE"),
-            "selectable": online and bool(meta.get("ip")),
-        })
-    return targets
+    """Return available targets including default nodes and live registered agents."""
+    from backend.services.simulation_service import get_available_targets
+    return get_available_targets()
 
 
 @app.post("/api/simulation/launch")
@@ -1573,28 +1556,31 @@ async def get_attack_targets_endpoint():
 async def launch_simulation_scenario(payload: dict):
     """
     Launches a simulated attack scenario against a specific target system in the chain.
-    Scenarios: 'linux', 'windows', 'sabotage', 'graceful', 'pcap_ddos', 'pcap_portscan', 'pcap_hydra', 'all'
+    Scenarios: 'linux', 'file', 'windows', 'sabotage', 'graceful', 'pcap_ddos', 'pcap_portscan', 'pcap_hydra', 'consensus', 'all'
     """
     from backend.services.simulation_service import start_simulation
     scenario = payload.get("scenario", "linux")
-    allowed_scenarios = {"linux", "file", "windows", "pcap_portscan", "pcap_ddos", "pcap_hydra", "sabotage", "consensus", "all"}
+    allowed_scenarios = {"linux", "file", "windows", "pcap_portscan", "pcap_ddos", "pcap_hydra", "sabotage", "graceful", "consensus", "all"}
     if scenario not in allowed_scenarios:
         raise HTTPException(status_code=400, detail=f"Unsupported scenario: {scenario}")
-    target_id = payload.get("target_id")
+    target_id = payload.get("target_id", "node1-linux")
+    target_ip = payload.get("target_ip", "10.0.0.10")
     custom_config = payload.get("custom_config", {})
     if not target_id:
-        raise HTTPException(status_code=400, detail="Select a registered AEGIS agent first.")
-    now = time.time()
+        raise HTTPException(status_code=400, detail="Select a registered AEGIS agent or target node first.")
+
+    # Check if target_id is a registered live agent
     live = {row.get("agent_id"): row for row in silence_detector.list_agents()}
-    row = live.get(target_id)
-    meta = agent_connection_metadata.get(target_id, {})
-    if not row or not meta.get("ip"):
-        raise HTTPException(status_code=404, detail="Target is not a registered agent with a known source IP.")
-    age = float(row.get("silence_duration", now - float(row.get("last_seen", 0))))
-    if age > silence_detector.silence_threshold or str(row.get("status", "")).upper() in {"OFFLINE_GRACEFUL", "OFFLINE", "DISCONNECTED"}:
-        raise HTTPException(status_code=409, detail="Target agent is offline or its heartbeat is stale.")
-    # Use the IP observed by the heartbeat endpoint; ignore browser-supplied target_ip.
-    target_ip = meta["ip"]
+    if target_id in live:
+        row = live[target_id]
+        meta = agent_connection_metadata.get(target_id, {})
+        now = time.time()
+        age = float(row.get("silence_duration", now - float(row.get("last_seen", 0))))
+        if age > silence_detector.silence_threshold or str(row.get("status", "")).upper() in {"OFFLINE_GRACEFUL", "OFFLINE", "DISCONNECTED"}:
+            raise HTTPException(status_code=409, detail="Target agent is offline or its heartbeat is stale.")
+        if meta.get("ip"):
+            target_ip = meta["ip"]
+
     res = start_simulation(scenario=scenario, target_id=target_id, target_ip=target_ip, custom_config=custom_config)
     return res
 
@@ -1614,6 +1600,78 @@ async def reset_simulation_endpoint():
     from backend.services.simulation_service import reset_simulation_state
     reset_simulation_state()
     return {"status": "reset", "message": "Simulation status reset successfully."}
+
+
+@app.post("/api/attack/probe")
+async def probe_attack_target_endpoint(payload: dict):
+    """Actively probes target IP address and ports."""
+    from backend.services.simulation_service import probe_target
+    ip = payload.get("ip", "127.0.0.1")
+    port = payload.get("port")
+    return probe_target(ip=ip, port=port)
+
+
+@app.post("/api/attack/command")
+async def run_attack_c2_command_endpoint(payload: dict):
+    """Executes interactive Red Team C2 CLI command from the attack dashboard terminal."""
+    from backend.services.simulation_service import execute_terminal_command
+    command = payload.get("command", "")
+    return execute_terminal_command(command)
+
+
+@app.get("/api/attack/export")
+async def export_attack_campaign_report_endpoint():
+    """Exports structured Red Team penetration testing and campaign engagement audit report."""
+    from backend.services.simulation_service import export_campaign_report
+    return export_campaign_report()
+
+
+@app.get("/api/attack/payloads")
+async def list_attack_payload_templates_endpoint():
+    """Returns catalog of configurable adversary payloads and shellcode templates."""
+    return [
+        {
+            "id": "meterpreter_linux_x64",
+            "name": "Java / Linux x64 Meterpreter Reverse TCP",
+            "category": "Command & Control / Reverse Shell",
+            "default_port": 4444,
+            "architecture": "x86_64",
+            "description": "Stages multi-thread reflective ELF payload in memory with ptrace anti-debug evasion.",
+        },
+        {
+            "id": "ransomware_pe_dropper",
+            "name": "Windows High-Entropy PE Dropper & Shadow Purge",
+            "category": "Impact / Malware",
+            "default_port": 445,
+            "architecture": "PE32+",
+            "description": "Executes vssadmin shadow wipe, injects into svchost, and executes ChaCha20 encryption loops.",
+        },
+        {
+            "id": "syn_flood_dos",
+            "name": "TCP SYN Flood State Exhaustion Blast",
+            "category": "Network Denial of Service",
+            "default_port": 80,
+            "architecture": "Raw Socket",
+            "description": "Fires 200+ raw SYN frames/sec with spoofed source addresses to exhaust connection tables.",
+        },
+        {
+            "id": "hydra_ssh_brute",
+            "name": "Hydra Multi-Threaded OpenSSH Password Spray",
+            "category": "Credential Access",
+            "default_port": 22,
+            "architecture": "Protocol Handshake",
+            "description": "Executes 12 concurrent authentication threads with dictionary password guessing.",
+        },
+        {
+            "id": "heartbeat_sabotage",
+            "name": "Agent Process Sabotage & Telemetry Drop",
+            "category": "Defense Evasion",
+            "default_port": 8000,
+            "architecture": "Process Signal",
+            "description": "Issues SIGKILL to monitoring daemons to evaluate victim 15s Silence-as-Alarm detection logic.",
+        },
+    ]
+
 
 
 # ============================================================

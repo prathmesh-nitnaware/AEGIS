@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-_ROOT = Path(r"d:\AEGIS")
+_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_ROOT / "agent"))
 
