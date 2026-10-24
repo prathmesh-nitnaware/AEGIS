@@ -60,6 +60,8 @@ import CopilotAdvisorTab from "./CopilotAdvisorTab";
 import ThreatIntelTab from "./ThreatIntelTab";
 import RbacAuthTab from "./RbacAuthTab";
 import LivePeerVotingVisualization from "./LivePeerVotingVisualization";
+import AgentMachineCockpit from "./AgentMachineCockpit";
+
 
 
 const API_BASE = typeof window !== "undefined"
@@ -263,6 +265,12 @@ export default function App() {
   const [selectedSystemFilter, setSelectedSystemFilter] = useState(null);
   const [systemSearchQuery, setSystemSearchQuery] = useState("");
   const [selectedAgentForTelemetry, setSelectedAgentForTelemetry] = useState(null);
+
+  const selectTab = (tab) => {
+    setActiveTab(tab);
+    setSelectedAgentForTelemetry(null);
+    setSelectedSystemFilter(null);
+  };
   const [maintForm, setMaintForm] = useState({
     agent_id: "*",
     duration_minutes: 60,
@@ -876,8 +884,8 @@ export default function App() {
           <div className="nav-section">AEGIS SOC</div>
 
           <button
-            className={`nav-item ${activeTab === "overview" ? "active" : ""}`}
-            onClick={() => setActiveTab("overview")}
+            className={`nav-item ${activeTab === "overview" && !selectedAgentForTelemetry ? "active" : ""}`}
+            onClick={() => selectTab("overview")}
           >
             <Activity size={16} />
             Security Overview
@@ -885,7 +893,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "verdicts" ? "active" : ""}`}
-            onClick={() => setActiveTab("verdicts")}
+            onClick={() => selectTab("verdicts")}
           >
             <Database size={16} />
             Consensus & Feedback
@@ -894,7 +902,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "peer_voting" ? "active" : ""}`}
-            onClick={() => setActiveTab("peer_voting")}
+            onClick={() => selectTab("peer_voting")}
           >
             <Network size={16} />
             Live Peer Voting
@@ -903,7 +911,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "maintenance" ? "active" : ""}`}
-            onClick={() => setActiveTab("maintenance")}
+            onClick={() => selectTab("maintenance")}
           >
             <Calendar size={16} />
             Maintenance Windows
@@ -914,7 +922,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "agents" ? "active" : ""}`}
-            onClick={() => setActiveTab("agents")}
+            onClick={() => selectTab("agents")}
           >
             <Server size={16} />
             Fleet & Trust Tracker
@@ -923,7 +931,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "audit" ? "active" : ""}`}
-            onClick={() => setActiveTab("audit")}
+            onClick={() => selectTab("audit")}
           >
             <FileText size={16} />
             Mitigation Audit Log
@@ -933,7 +941,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "processes" ? "active" : ""}`}
-            onClick={() => setActiveTab("processes")}
+            onClick={() => selectTab("processes")}
           >
             <Cpu size={16} />
             Live Processes
@@ -942,7 +950,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "detections" ? "active" : ""}`}
-            onClick={() => setActiveTab("detections")}
+            onClick={() => selectTab("detections")}
           >
             <AlertTriangle size={16} />
             Threat Detections
@@ -951,7 +959,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "models" ? "active" : ""}`}
-            onClick={() => setActiveTab("models")}
+            onClick={() => selectTab("models")}
           >
             <Shield size={16} />
             ML Inference Engine
@@ -959,7 +967,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "mitre" ? "active" : ""}`}
-            onClick={() => setActiveTab("mitre")}
+            onClick={() => selectTab("mitre")}
           >
             <Target size={16} />
             MITRE ATT&amp;CK Matrix
@@ -967,7 +975,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "simulation" ? "active" : ""}`}
-            onClick={() => setActiveTab("simulation")}
+            onClick={() => selectTab("simulation")}
           >
             <Zap size={16} />
             Red Team Simulation Lab
@@ -975,7 +983,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "benchmark" ? "active" : ""}`}
-            onClick={() => setActiveTab("benchmark")}
+            onClick={() => selectTab("benchmark")}
           >
             <Gauge size={16} />
             System Benchmarks
@@ -983,7 +991,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "pcap" ? "active" : ""}`}
-            onClick={() => setActiveTab("pcap")}
+            onClick={() => selectTab("pcap")}
           >
             <Radio size={16} />
             PCAP Capture & Replayer
@@ -993,7 +1001,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "kernel" ? "active" : ""}`}
-            onClick={() => setActiveTab("kernel")}
+            onClick={() => selectTab("kernel")}
           >
             <Cpu size={16} />
             Kernel eBPF &amp; ETW
@@ -1001,7 +1009,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "copilot_advisor" ? "active" : ""}`}
-            onClick={() => setActiveTab("copilot_advisor")}
+            onClick={() => selectTab("copilot_advisor")}
           >
             <BrainCircuit size={16} />
             AI Copilot &amp; Playbooks
@@ -1009,7 +1017,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "threat_intel" ? "active" : ""}`}
-            onClick={() => setActiveTab("threat_intel")}
+            onClick={() => selectTab("threat_intel")}
           >
             <Globe size={16} />
             Threat Intel (STIX/TAXII)
@@ -1017,7 +1025,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "rbac_auth" ? "active" : ""}`}
-            onClick={() => setActiveTab("rbac_auth")}
+            onClick={() => selectTab("rbac_auth")}
           >
             <Lock size={16} />
             SOC RBAC &amp; Access Control
@@ -1025,7 +1033,7 @@ export default function App() {
 
           <button
             className={`nav-item ${activeTab === "compliance_tab" ? "active" : ""}`}
-            onClick={() => setActiveTab("compliance_tab")}
+            onClick={() => selectTab("compliance_tab")}
           >
             <Award size={16} />
             Compliance &amp; Audit PDF
@@ -1152,8 +1160,33 @@ export default function App() {
           </div>
         )}
 
-        {/* Dynamic Metric Cards */}
-        <section className="stats-grid">
+        {/* ═══ CONDITIONAL FULL-PAGE AGENT MACHINE COCKPIT ═══ */}
+        {selectedAgentForTelemetry ? (
+          <AgentMachineCockpit
+            agentId={selectedAgentForTelemetry}
+            agents={agents}
+            onSelectAgent={(id) => {
+              setSelectedAgentForTelemetry(id);
+              setSelectedSystemFilter(id);
+            }}
+            onClose={() => {
+              setSelectedAgentForTelemetry(null);
+              setSelectedSystemFilter(null);
+            }}
+            processes={processes}
+            telemetryRecords={telemetryRecords}
+            alerts={alerts}
+            agentTrustMap={agentTrustMap}
+            maintenanceWindows={maintenanceWindows}
+            silenceAlarms={silenceAlarms}
+            sendTestPulse={sendTestPulse}
+            onInspectProcess={(t) => setSelectedProcess(t)}
+            API_BASE={API_BASE}
+          />
+        ) : (
+          <>
+            {/* Dynamic Metric Cards */}
+            <section className="stats-grid">
           <StatCard
             icon={Cpu}
             label="Monitored Processes"
@@ -1764,9 +1797,18 @@ export default function App() {
                             </div>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <span className="click-hint-text">
-                              {isSelected ? "Hide Telemetry ▲" : "View Telemetry ▼"}
-                            </span>
+                            <button
+                              className="btn-open-cockpit"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedAgentForTelemetry(a.agentId);
+                                setSelectedSystemFilter(a.agentId);
+                              }}
+                              title={`Inspect full machine cockpit, telemetry stream & ECG heartbeat for ${a.agentId}`}
+                            >
+                              <Activity size={12} />
+                              <span>Inspect Cockpit &amp; ECG ↗</span>
+                            </button>
                             <div
                               className={`health-dot ${
                                 a.alarmed || a.status === "silent"
@@ -1787,146 +1829,6 @@ export default function App() {
                             />
                           </div>
                         </div>
-
-                        {/* EXPANDED TELEMETRY LISTING FOR THIS SPECIFIC AGENT */}
-                        {isSelected && (
-                          <div className="agent-telemetry-drawer">
-                            <div className="drawer-header">
-                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <Terminal size={15} style={{ color: "#38bdf8" }} />
-                                <div>
-                                  <strong style={{ fontSize: 13, color: "#f1f5f9" }}>
-                                    Live Telemetry Stream for {a.agentId}
-                                  </strong>
-                                  <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 8 }}>
-                                    Machine IP: <code style={{ color: "#38bdf8" }}>{agentIp}</code> · {dedupedAgentEvents.length} events recorded
-                                  </span>
-                                </div>
-                              </div>
-                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <button
-                                  className="btn-drawer-action"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    document.querySelector(".activity-panel")?.scrollIntoView({ behavior: "smooth" });
-                                  }}
-                                  title="Scroll up to filtered main table"
-                                >
-                                  <ArrowUp size={12} /> View in Main Feed
-                                </button>
-                                <button
-                                  className="btn-drawer-action"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    sendTestPulse(a.agentId);
-                                  }}
-                                  title="Send test telemetry event for this machine"
-                                >
-                                  <RefreshCw size={12} /> Test Pulse
-                                </button>
-                                <button
-                                  className="btn-drawer-close"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedAgentForTelemetry(null);
-                                    setSelectedSystemFilter(null);
-                                  }}
-                                  title="Close listing"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            </div>
-
-                            {dedupedAgentEvents.length > 0 ? (
-                              <div className="drawer-table-wrapper">
-                                <table className="aegis-table" style={{ fontSize: 12 }}>
-                                  <thead>
-                                    <tr>
-                                      <th>Process / Event</th>
-                                      <th>Machine IP</th>
-                                      <th>PID</th>
-                                      <th>Syscall / Detail</th>
-                                      <th>Threat Score</th>
-                                      <th>Verdict</th>
-                                      <th>Timestamp</th>
-                                      <th style={{ textAlign: "right" }}>Inspect</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {dedupedAgentEvents.map((t, idx) => (
-                                      <tr key={t.id || idx}>
-                                        <td>
-                                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                            <Terminal size={13} style={{ color: "#38bdf8" }} />
-                                            <strong>{t.process}</strong>
-                                          </div>
-                                        </td>
-                                        <td>
-                                          <code style={{ fontSize: 11, color: "#94a3b8" }}>{t.ip || agentIp}</code>
-                                        </td>
-                                        <td><code>{t.pid}</code></td>
-                                        <td><code>{t.syscall}</code></td>
-                                        <td>
-                                          <span
-                                            className="threat-pill"
-                                            style={{
-                                              background: getThreatColor(t.threat_score) + "22",
-                                              color: getThreatColor(t.threat_score),
-                                              borderColor: getThreatColor(t.threat_score) + "55",
-                                              fontSize: 11,
-                                              padding: "1px 6px",
-                                            }}
-                                          >
-                                            {((t.threat_score || 0) * 100).toFixed(1)}%
-                                          </span>
-                                        </td>
-                                        <td>
-                                          <span className={`verdict-badge ${t.predicted_class === "Normal" ? "normal" : "alert"}`}>
-                                            {t.predicted_class}
-                                          </span>
-                                        </td>
-                                        <td style={{ color: "#64748b", fontSize: 11 }}>
-                                          {formatTimestamp(t.timestamp)}
-                                        </td>
-                                        <td style={{ textAlign: "right" }}>
-                                          <button
-                                            className="btn-inspect"
-                                            style={{ padding: "3px 8px", fontSize: 11 }}
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setSelectedProcess({ ...t, ip: agentIp });
-                                            }}
-                                            title="Inspect telemetry JSON"
-                                          >
-                                            <Eye size={12} /> Inspect
-                                          </button>
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            ) : (
-                              <div className="empty-drawer-placeholder">
-                                <Activity size={22} style={{ color: "#64748b" }} />
-                                <p style={{ margin: "4px 0", fontSize: 12, color: "#94a3b8" }}>
-                                  No telemetry events received from <strong>{a.agentId}</strong> ({agentIp}) yet.
-                                </p>
-                                <button
-                                  className="btn-small-pulse"
-                                  style={{ marginTop: 6, fontSize: 11, padding: "4px 10px" }}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    sendTestPulse(a.agentId);
-                                  }}
-                                >
-                                  Trigger Test Pulse for {a.agentId}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
                       </div>
                     );
                   })
@@ -2737,6 +2639,8 @@ export default function App() {
               )}
             </div>
           </section>
+        )}
+          </>
         )}
 
 
