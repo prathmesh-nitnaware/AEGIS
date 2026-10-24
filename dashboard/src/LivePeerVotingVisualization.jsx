@@ -637,37 +637,25 @@ export default function LivePeerVotingVisualization({
     }
 
     // B3. Real-Time Operational Live Mesh Constellation
+    // B3. Real-Time Operational Live Mesh Constellation
     // Map all tracked agents from /api/agents and props
     const rawAgentList = Object.values(localAgents || {}).filter(Boolean);
 
-    // Identify external endpoint agents (e.g. Linux agent 'kali')
-    let endpointAgents = rawAgentList.filter(
-      (a) => {
-        const id = (a.agentId || a.agent_id || "").toLowerCase();
-        return id !== srvMeta.id.toLowerCase() && !(a.role && a.role.toLowerCase().includes("server"));
-      }
-    );
-
-    // If endpointAgents is not in localAgents yet, synthesize from telemetry records or verdicts
-    if (endpointAgents.length === 0) {
-      const rec = (telemetryRecords || []).find(r => r.agent_id && r.agent_id.toLowerCase() !== srvMeta.id.toLowerCase() && !r.agent_id.toLowerCase().includes("server"));
-      const verd = (liveVerdicts || []).find(v => v.origin_agent_id && v.origin_agent_id.toLowerCase() !== srvMeta.id.toLowerCase() && !v.origin_agent_id.toLowerCase().includes("server"));
-      const candId = rec?.agent_id || verd?.origin_agent_id || "kali";
-      const candIp = rec?.ip || (candId === "kali" ? "172.16.225.88" : "127.0.0.1");
-      const candOs = rec?.os || "Linux";
-
-      endpointAgents = [
-        {
-          agentId: candId,
-          ip: candIp,
-          os: candOs,
-          role: "Endpoint Agent",
-          status: "healthy",
-          cpu: 5.0,
-          lastSeen: Date.now(),
+    // Identify active endpoint agents (distinguishing if an agent is running locally on the same host)
+    const endpointAgents = rawAgentList
+      .filter((a) => !(a.role && a.role.toLowerCase().includes("server")))
+      .map((a) => {
+        const id = (a.agentId || a.agent_id || "");
+        if (id.toLowerCase() === srvMeta.id.toLowerCase()) {
+          return {
+            ...a,
+            agentId: `${id}-Agent`,
+            role: "Endpoint Agent",
+            os: a.os || srvMeta.os || "Windows",
+          };
         }
-      ];
-    }
+        return a;
+      });
 
     // CASE 1: ZERO EXTERNAL AGENTS CONNECTED (Only Server Online)
     if (endpointAgents.length === 0) {
@@ -691,13 +679,13 @@ export default function LivePeerVotingVisualization({
         severity: "SAFE",
         response_action: "MONITOR",
         total_weight: 1.5,
-        peers: [], // Awaiting Linux agent to connect
+        peers: [], // Awaiting peer agent to connect
         timeline: [
           {
             id: 1,
             ts: Date.now(),
             event: "COMMAND_NODE_ONLINE",
-            detail: `${srvMeta.fullName} online on ${srvMeta.ip}:8000. Waiting for Linux agent ('kali') to connect.`,
+            detail: `${srvMeta.fullName} online on ${srvMeta.ip}:8000. Standby mode: Awaiting endpoint agents to connect.`,
             type: "info",
           },
         ],
@@ -1851,7 +1839,7 @@ function NetworkMeshGraphic({
           </text>
           <rect x="-10" y="46" width="140" height="20" rx="4" fill="#0b1019" stroke="#1e293b" />
           <text x="60" y="59" textAnchor="middle" fill="#64748b" fontSize="8" fontFamily="JetBrains Mono, monospace">
-            Awaiting Linux Agent (kali)
+            Awaiting Endpoint Agent
           </text>
         </g>
       )}
