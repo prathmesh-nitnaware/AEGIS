@@ -50,7 +50,7 @@ class ServerShutdownWatchdog:
         self.max_consecutive_failures = int(
             max_consecutive_failures
             or os.environ.get("AEGIS_MAX_SERVER_FAILURES")
-            or 3
+            or 8
         )
         self.initial_connection_timeout = float(
             initial_connection_timeout
