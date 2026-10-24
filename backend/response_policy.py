@@ -96,14 +96,23 @@ def decide_response(verdict: Mapping[str, Any]) -> dict[str, Any]:
             remote_ip = (details.get("remote_ip") or details.get("src_ip")
                          or details.get("ip") or verdict.get("target_ip"))
             if isinstance(remote_ip, str) and remote_ip.strip():
-                if str(verdict.get("event_type", "")).lower() in {"network", "cicids"} or verdict.get("recommended_action") == "BLOCK_REMOTE_IP":
+                etype = str(verdict.get("event_type", "")).lower()
+                if etype in {"network", "cicids", "pcap_ddos", "pcap_hydra"} or verdict.get("recommended_action") == "BLOCK_REMOTE_IP":
                     clean_ip = remote_ip.strip()
                     # Immune system guard: never block localhost or loopback
                     if not (clean_ip.startswith("127.") or clean_ip in {"localhost", "::1", "0.0.0.0"}):
                         proposed = "BLOCK_REMOTE_IP"
 
-    if proposed == "ISOLATE_HOST":
-        proposed = "ALERT"  # fail closed: host isolation permanently disabled to prevent lockout
+        if score >= 0.95 and verdict.get("recommended_action") == "ISOLATE_HOST":
+            if _enabled("AEGIS_ISOLATION_ENABLED", False):
+                proposed = "ISOLATE_HOST"
+            else:
+                # If isolation is not explicitly enabled, fallback to file quarantine or alert
+                file_path = (details.get("target_file") or details.get("file_path") or details.get("filename"))
+                proposed = "QUARANTINE_FILE" if file_path else "ALERT"
+
+    if proposed == "ISOLATE_HOST" and not _enabled("AEGIS_ISOLATION_ENABLED", False):
+        proposed = "ALERT"  # fail closed: host isolation permanently disabled unless AEGIS_ISOLATION_ENABLED=true
 
     return {
         "action": proposed,

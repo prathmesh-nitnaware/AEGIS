@@ -143,6 +143,67 @@ class CentralizedVotingCoordinator:
         "CRITICAL": "ISOLATE_HOST",
     }
 
+    @classmethod
+    def resolve_recommended_action(
+        cls,
+        severity: str,
+        event_type: str,
+        threat_score: float,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Intelligently determine the proportional EDR response action
+        based on the threat vector, event type, and severity.
+        """
+        sev = str(severity).upper()
+        etype = str(event_type or "").lower().strip()
+        det = details or {}
+
+        # 1. Low threats are always logged for audit trails
+        if sev == "LOW" or threat_score < 0.40:
+            return "LOG"
+
+        # 2. Medium threats trigger SOC alert
+        if sev == "MEDIUM" or threat_score < 0.70:
+            return "ALERT"
+
+        # 3. High & Critical threats -> Vector-Aware EDR Countermeasures
+        # Vector A: Network layer attacks (SYN Flood, Port Scan, Hydra Brute Force)
+        if etype in ("network", "cicids", "pcap_ddos", "pcap_portscan", "pcap_hydra"):
+            attack_name = str(det.get("scenario") or det.get("attack") or det.get("label") or det.get("flow_label") or "").lower()
+            # Reconnaissance / PortScan -> Alert / Log, do not sever network
+            if "portscan" in attack_name or "scan" in attack_name or etype == "pcap_portscan":
+                return "ALERT"
+            # DoS / Brute Force / Exploitation -> Firewall block on remote attacker IP
+            return "BLOCK_REMOTE_IP"
+
+        # Vector B: Host process injection / Memory tampering (Meterpreter, ptrace, setuid)
+        if etype in ("process_linux", "process_windows", "linux", "syscall"):
+            return "KILL_PROCESS"
+
+        # Vector C: Ransomware / Malicious file dropper
+        if etype in ("file", "ember", "windows", "suspicious_file"):
+            # If active ransomware encryption burst or shadow deletion is corroborated, escalate to ISOLATE_HOST
+            entropy = float(det.get("entropy") or 0.0)
+            is_ransomware = (
+                entropy >= 7.5
+                or "ransomware" in str(det.get("description") or "").lower()
+                or "vssadmin" in str(det.get("command") or "").lower()
+                or "encrypt" in str(det.get("tag") or "").lower()
+            )
+            if is_ransomware and sev == "CRITICAL" and threat_score >= 0.95:
+                return "ISOLATE_HOST"
+            return "QUARANTINE_FILE"
+
+        # Vector D: Defense Evasion / Silence / Tampering
+        if etype in ("sabotage", "silence", "tamper", "graceful"):
+            return "ALERT"
+
+        # Fallback based on severity table
+        if sev == "CRITICAL":
+            return "KILL_PROCESS"
+        return "ALERT"
+
     def __init__(
         self,
         repository: CentralizedTelemetryRepository,
@@ -305,8 +366,13 @@ class CentralizedVotingCoordinator:
             req, peer_responses, origin_trust=origin_trust, expected_peers=expected_peers
         )
 
-        # 4. Map severity to automated response action
-        recommended_action = self.RESPONSE_ACTIONS.get(verdict.severity, "LOG")
+        # 4. Map severity and threat vector to automated EDR response action
+        recommended_action = self.resolve_recommended_action(
+            severity=verdict.severity,
+            event_type=verdict.event_type,
+            threat_score=verdict.final_weighted_score,
+            details=details,
+        )
 
         result = {
             "vote_id": verdict.vote_id,

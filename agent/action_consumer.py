@@ -89,6 +89,10 @@ class ActionConsumerDaemon:
             action_type,
         )
 
+        parameters = action.get("parameters") or action.get("details") or {}
+        if isinstance(parameters, dict) and "details" in parameters and isinstance(parameters["details"], dict):
+            parameters = {**parameters["details"], **parameters}
+
         try:
             if action_type == "SUSPEND_PROCESS":
                 if not target_pid:
@@ -115,6 +119,30 @@ class ActionConsumerDaemon:
 
             elif action_type == "UNISOLATE_HOST":
                 return self.driver.unisolate_host()
+
+            elif action_type == "BLOCK_REMOTE_IP":
+                remote_ip = (
+                    action.get("target_ip")
+                    or parameters.get("remote_ip")
+                    or parameters.get("src_ip")
+                    or parameters.get("ip")
+                    or parameters.get("target_ip")
+                )
+                if not remote_ip:
+                    return {"status": "failed", "reason": "Missing target remote_ip for BLOCK_REMOTE_IP"}
+                return self.driver.block_remote_ip(str(remote_ip))
+
+            elif action_type == "UNBLOCK_REMOTE_IP":
+                remote_ip = (
+                    action.get("target_ip")
+                    or parameters.get("remote_ip")
+                    or parameters.get("src_ip")
+                    or parameters.get("ip")
+                    or parameters.get("target_ip")
+                )
+                if not remote_ip:
+                    return {"status": "failed", "reason": "Missing target remote_ip for UNBLOCK_REMOTE_IP"}
+                return self.driver.unblock_remote_ip(str(remote_ip))
 
             elif action_type == "ALERT":
                 return self.driver.log_action("ALERT", action)

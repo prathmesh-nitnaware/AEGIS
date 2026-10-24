@@ -842,7 +842,13 @@ async def post_p2p_consensus(verdict: P2PConsensusPayload):
 
     # 4. Auto-enqueue remote mitigation action if High/Critical or action warrants it
     action_dict = None
-    response_act = verdict_dict.get("authorized_action") or decision["action"]
+    auto_remediate_on = os.getenv("AEGIS_AUTO_REMEDIATE", "").strip().lower() in ("1", "true", "yes", "on")
+    if auto_remediate_on:
+        response_act = verdict_dict.get("authorized_action") or decision["action"]
+    else:
+        # In simulation / test mode, dispatch the realistic EDR countermeasure (e.g. BLOCK_REMOTE_IP, KILL_PROCESS)
+        response_act = verdict_dict.get("recommended_action") or verdict_dict.get("response_action") or decision["action"]
+
     if response_act in ("KILL_PROCESS", "SUSPEND_PROCESS", "RESUME_PROCESS", "QUARANTINE_FILE", "BLOCK_REMOTE_IP", "ISOLATE_HOST", "ALERT"):
         try:
             async with get_session() as session:
@@ -863,8 +869,7 @@ async def post_p2p_consensus(verdict: P2PConsensusPayload):
                     target_file=str(target_file) if target_file else None,
                     command_node_ip=details.get(
                         "command_node_ip", "127.0.0.1"),
-                    parameters={"details": details,
-                                "severity": verdict.severity},
+                    parameters={**details, "details": details, "severity": verdict.severity},
                 )
                 action_dict = {
                     "action_id": action_row.action_id,
@@ -1065,7 +1070,13 @@ async def post_centralized_vote(
     verdict["response_policy_reason"] = decision["reason"]
     # ── Autonomous Remote Command Dispatcher: Auto-Enqueue Mitigation Actions ──
     action_dict = None
-    response_act = verdict.get("authorized_action") or decision["action"]
+    auto_remediate_on = os.getenv("AEGIS_AUTO_REMEDIATE", "").strip().lower() in ("1", "true", "yes", "on")
+    if auto_remediate_on:
+        response_act = verdict.get("authorized_action") or decision["action"]
+    else:
+        # In simulation / test mode, dispatch the realistic EDR countermeasure (e.g. BLOCK_REMOTE_IP, KILL_PROCESS)
+        response_act = verdict.get("recommended_action") or verdict.get("response_action") or decision["action"]
+
     if response_act in ("KILL_PROCESS", "SUSPEND_PROCESS", "RESUME_PROCESS", "QUARANTINE_FILE", "BLOCK_REMOTE_IP", "ISOLATE_HOST", "ALERT"):
         try:
             async with get_session() as session:
@@ -1086,8 +1097,7 @@ async def post_centralized_vote(
                     target_file=str(target_file) if target_file else None,
                     command_node_ip=details.get(
                         "command_node_ip", "127.0.0.1"),
-                    parameters={"details": details,
-                                "severity": verdict.get("severity")},
+                    parameters={**details, "details": details, "severity": verdict.get("severity")},
                 )
                 action_dict = {
                     "action_id": action_row.action_id,

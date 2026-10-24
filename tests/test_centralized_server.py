@@ -80,7 +80,8 @@ class TestCentralizedVotingCoordinator:
         assert verdict["origin_agent_id"] == "vm1"
         assert verdict["participating_peers"] == 1
         assert verdict["severity"] == "CRITICAL"
-        assert verdict["response_action"] == "ISOLATE_HOST"
+        # Network DoS/attack vector correctly resolves to BLOCK_REMOTE_IP (never isolate host)
+        assert verdict["response_action"] == "BLOCK_REMOTE_IP"
 
     def test_response_action_mapping(self):
         repo = CentralizedTelemetryRepository()
@@ -95,7 +96,7 @@ class TestCentralizedVotingCoordinator:
         assert res_low["severity"] == "LOW"
         assert res_low["response_action"] == "LOG"
 
-        # High score -> KILL_PROCESS
+        # High score process -> KILL_PROCESS
         res_high = coordinator.process_vote_request(
             event_type="process_windows",
             origin_agent_id="vm1",
@@ -103,6 +104,16 @@ class TestCentralizedVotingCoordinator:
         )
         assert res_high["severity"] == "HIGH"
         assert res_high["response_action"] == "KILL_PROCESS"
+
+        # Critical ransomware with mass encryption entropy -> ISOLATE_HOST
+        res_ransomware = coordinator.process_vote_request(
+            event_type="file",
+            origin_agent_id="vm1",
+            threat_score=0.98,
+            details={"entropy": 7.95, "tag": "ransomware_encryption"},
+        )
+        assert res_ransomware["severity"] == "CRITICAL"
+        assert res_ransomware["response_action"] == "ISOLATE_HOST"
 
 
 class TestCentralizedFastAPIEndpoints:
@@ -125,7 +136,7 @@ class TestCentralizedFastAPIEndpoints:
         assert data["status"] == "success"
         assert "verdict" in data
         assert data["verdict"]["origin_agent_id"] == "vm1"
-        assert data["verdict"]["response_action"] in ("HIGH", "CRITICAL", "KILL_PROCESS", "ISOLATE_HOST")
+        assert data["verdict"]["response_action"] in ("HIGH", "CRITICAL", "KILL_PROCESS", "ISOLATE_HOST", "BLOCK_REMOTE_IP")
 
     def test_get_centralized_telemetry_endpoint(self, client):
         response = client.get("/api/centralized/telemetry?min_score=0.0")

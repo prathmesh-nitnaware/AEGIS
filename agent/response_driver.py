@@ -509,6 +509,97 @@ class AgentResponseDriver:
         self.log_action("UNISOLATE_HOST", res)
         return res
 
+    def block_remote_ip(self, remote_ip: str) -> Dict[str, Any]:
+        """
+        Block an attacking remote IP address via host firewall (iptables/netsh).
+        Includes Anti-Lockout protection for Command Node and localhost.
+        """
+        clean_ip = str(remote_ip or "").strip()
+        logger.info("[ResponseDriver] Attempting BLOCK_REMOTE_IP for '%s' (mode=%s)", clean_ip, self.response_mode)
+        is_sim = (self.response_mode == "simulation")
+
+        if not clean_ip:
+            res = {"status": "DENIED", "reason": "Missing target IP address", "simulation": is_sim}
+            self.log_action("BLOCK_REMOTE_IP", res)
+            return res
+
+        # Anti-Lockout Whitelist Check
+        import socket
+        protected_ips = {"127.0.0.1", "::1", "localhost", "0.0.0.0"}
+        if self.command_node_ip:
+            protected_ips.add(self.command_node_ip)
+        try:
+            protected_ips.update(socket.gethostbyname_ex(socket.gethostname())[2])
+        except Exception:
+            pass
+
+        if clean_ip in protected_ips or clean_ip.startswith("127."):
+            res = {
+                "status": "DENIED",
+                "reason": f"Anti-Lockout: Target IP {clean_ip} is protected AEGIS infrastructure",
+                "remote_ip": clean_ip,
+                "simulation": is_sim,
+            }
+            self.log_action("BLOCK_REMOTE_IP", res)
+            return res
+
+        if is_sim:
+            res = {"status": "SIMULATED", "remote_ip": clean_ip, "mode": "simulation", "simulation": True}
+            self.log_action("BLOCK_REMOTE_IP", res)
+            return res
+
+        # Live Mode Execution
+        system_platform = platform.system().lower()
+        rule_name = f"AEGIS_BLOCK_{clean_ip.replace(':', '_').replace('.', '_')}"
+        try:
+            if "windows" in system_platform:
+                cmd = ["netsh", "advfirewall", "firewall", "add", "rule", f"name={rule_name}", "dir=in", "action=block", f"remoteip={clean_ip}"]
+                subprocess.run(cmd, capture_output=True, check=True, timeout=5)
+            elif "linux" in system_platform:
+                cmd = ["iptables", "-I", "INPUT", "-s", clean_ip, "-j", "DROP"]
+                subprocess.run(cmd, capture_output=True, check=True, timeout=5)
+            res = {"status": "EXECUTED", "remote_ip": clean_ip, "rule_name": rule_name, "simulation": False}
+        except Exception as exc:
+            logger.error("[ResponseDriver] Error blocking remote IP %s: %s", clean_ip, exc)
+            res = {"status": "FAILED", "reason": str(exc), "remote_ip": clean_ip, "simulation": False}
+
+        self.log_action("BLOCK_REMOTE_IP", res)
+        return res
+
+    def unblock_remote_ip(self, remote_ip: str) -> Dict[str, Any]:
+        """
+        Remove firewall rule blocking a remote IP.
+        """
+        clean_ip = str(remote_ip or "").strip()
+        logger.info("[ResponseDriver] Attempting UNBLOCK_REMOTE_IP for '%s' (mode=%s)", clean_ip, self.response_mode)
+        is_sim = (self.response_mode == "simulation")
+        if not clean_ip:
+            res = {"status": "DENIED", "reason": "Missing target IP address", "simulation": is_sim}
+            self.log_action("UNBLOCK_REMOTE_IP", res)
+            return res
+
+        if is_sim:
+            res = {"status": "SIMULATED", "remote_ip": clean_ip, "mode": "simulation", "simulation": True}
+            self.log_action("UNBLOCK_REMOTE_IP", res)
+            return res
+
+        system_platform = platform.system().lower()
+        rule_name = f"AEGIS_BLOCK_{clean_ip.replace(':', '_').replace('.', '_')}"
+        try:
+            if "windows" in system_platform:
+                cmd = ["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_name}"]
+                subprocess.run(cmd, capture_output=True, timeout=5)
+            elif "linux" in system_platform:
+                cmd = ["iptables", "-D", "INPUT", "-s", clean_ip, "-j", "DROP"]
+                subprocess.run(cmd, capture_output=True, timeout=5)
+            res = {"status": "EXECUTED", "remote_ip": clean_ip, "simulation": False}
+        except Exception as exc:
+            logger.error("[ResponseDriver] Error unblocking remote IP %s: %s", clean_ip, exc)
+            res = {"status": "FAILED", "reason": str(exc), "remote_ip": clean_ip, "simulation": False}
+
+        self.log_action("UNBLOCK_REMOTE_IP", res)
+        return res
+
     def execute_verdict_action(self, verdict: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute response action based on a consensus verdict dictionary.
@@ -526,6 +617,12 @@ class AgentResponseDriver:
             return self.quarantine_file(str(file_path))
         elif action == "ISOLATE_HOST":
             return self.isolate_host()
+        elif action == "BLOCK_REMOTE_IP":
+            remote_ip = details.get("remote_ip") or details.get("src_ip") or details.get("ip") or verdict.get("target_ip")
+            return self.block_remote_ip(str(remote_ip or ""))
+        elif action == "UNBLOCK_REMOTE_IP":
+            remote_ip = details.get("remote_ip") or details.get("src_ip") or details.get("ip") or verdict.get("target_ip")
+            return self.unblock_remote_ip(str(remote_ip or ""))
         elif action == "ALERT":
             res = {"status": "EXECUTED", "verdict": verdict}
             self.log_action("ALERT", res)
