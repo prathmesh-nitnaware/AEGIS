@@ -45,7 +45,12 @@ try:
     # local module -- lief-based EMBER extractor (agent/ember_features.py)
     import ember_features
 except ImportError:
-    from agent import ember_features
+    try:
+        from agent import ember_features
+    except Exception:
+        ember_features = None
+except Exception:
+    ember_features = None
 
 from agent.collectors.collector_health import collector_registry
 

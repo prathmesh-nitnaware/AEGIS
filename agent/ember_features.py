@@ -51,10 +51,13 @@ import math
 import re
 from collections import Counter
 
-import lief
-import numpy as np
+try:
+    import lief
+    lief.logging.disable()
+except Exception:
+    lief = None
 
-lief.logging.disable()
+import numpy as np
 
 
 # ----------------------------------------------------------------------
@@ -335,6 +338,8 @@ def extract_feature_vector(raw: bytes):
     string. Raises ValueError if the bytes don't parse as a PE at all
     (caller should catch this and treat as "not a PE / skip").
     """
+    if lief is None:
+        raise ValueError("lief is not installed in this environment")
     binary = lief.PE.parse(list(raw)) if False else lief.PE.parse(raw)
     if binary is None:
         raise ValueError("Not a valid PE file (lief could not parse it)")
