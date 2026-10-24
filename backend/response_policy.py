@@ -12,8 +12,15 @@ import math
 import os
 from typing import Any, Mapping
 
-ALLOWED_ACTIONS = {"LOG", "ALERT", "SUSPEND_PROCESS", "RESUME_PROCESS", "KILL_PROCESS", "QUARANTINE_FILE", "ISOLATE_HOST"}
-DESTRUCTIVE_ACTIONS = {"KILL_PROCESS", "QUARANTINE_FILE", "ISOLATE_HOST", "SUSPEND_PROCESS"}
+ALLOWED_ACTIONS = {
+    "LOG", "ALERT", "SUSPEND_PROCESS", "RESUME_PROCESS",
+    "KILL_PROCESS", "QUARANTINE_FILE", "ISOLATE_HOST",
+    "BLOCK_REMOTE_IP", "UNBLOCK_REMOTE_IP",
+}
+DESTRUCTIVE_ACTIONS = {
+    "KILL_PROCESS", "QUARANTINE_FILE", "ISOLATE_HOST",
+    "SUSPEND_PROCESS", "BLOCK_REMOTE_IP",
+}
 
 PROTECTED_PROCESSES = {
     "systemd", "init", "sshd", "dockerd", "containerd", "journald",
@@ -84,6 +91,16 @@ def decide_response(verdict: Mapping[str, Any]) -> dict[str, Any]:
                 # Prefer quarantine for file-specific evidence if the event has a file target.
                 if str(verdict.get("event_type", "")).lower() in {"file", "ember"}:
                     proposed = "QUARANTINE_FILE"
+
+        if score >= float(os.getenv("AEGIS_BLOCK_IP_THRESHOLD", "0.85")):
+            remote_ip = (details.get("remote_ip") or details.get("src_ip")
+                         or details.get("ip") or verdict.get("target_ip"))
+            if isinstance(remote_ip, str) and remote_ip.strip():
+                if str(verdict.get("event_type", "")).lower() in {"network", "cicids"} or verdict.get("recommended_action") == "BLOCK_REMOTE_IP":
+                    clean_ip = remote_ip.strip()
+                    # Immune system guard: never block localhost or loopback
+                    if not (clean_ip.startswith("127.") or clean_ip in {"localhost", "::1", "0.0.0.0"}):
+                        proposed = "BLOCK_REMOTE_IP"
 
     if proposed == "ISOLATE_HOST":
         proposed = "ALERT"  # fail closed: host isolation permanently disabled to prevent lockout

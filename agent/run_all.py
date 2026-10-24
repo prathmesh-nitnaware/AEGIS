@@ -504,6 +504,9 @@ def _trigger_peer_voting_async(model: str, score: float, verdict: str, extra: di
     threading.Thread(target=_dispatch_vote, daemon=True).start()
 
 
+from concurrent.futures import ThreadPoolExecutor
+
+_telemetry_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="aegis-telemetry")
 _last_telemetry_error_time = 0.0
 _telemetry_delivered_count = 0
 
@@ -534,7 +537,15 @@ def _post_event_async(event_payload: dict) -> None:
             if now - _last_telemetry_error_time > 10.0:
                 _last_telemetry_error_time = now
                 print(f"  [!] Telemetry delivery to {target_url}/api/telemetry failed: {exc}")
-    threading.Thread(target=_send, daemon=True).start()
+
+    try:
+        # Bounded executor to prevent thread and socket exhaustion when servers are unreachable
+        work_q = getattr(_telemetry_executor, "_work_queue", None)
+        if work_q and work_q.qsize() > 40:
+            return
+        _telemetry_executor.submit(_send)
+    except Exception:
+        pass
 
 
 def save_event(model: str, score: Optional[float], verdict: str, **extra):
@@ -653,14 +664,20 @@ def start_zero_day() -> None:
 # ===========================================================================
 
 def start_cicids() -> None:
-    # Captures all network flows without dropping packets, ensuring 100% full-telemetry visibility.
-    net_collector = ScapyFlowCollector(flow_timeout=5.0)
+    # Captures network flows; drops internal loopback management polling at the sniffer layer.
+    net_collector = ScapyFlowCollector(
+        flow_timeout=2.0,
+        ignored_ports=AEGIS_MANAGEMENT_PORTS,
+        filter_loopback_only=True,
+    )
     # raises if scapy/privileges unavailable -- caught by collector_manager
     net_collector.start()
-    print("[run_all] CICIDS scapy sniffer started (full capture; intelligent loopback IPC & maturity classification enabled).")
+    print("[run_all] CICIDS scapy sniffer started (flow maturity, loopback IPC filtering & anti-loop protection enabled).")
     _running_handles["cicids"] = net_collector
 
     def network_loop():
+        parsed_cmd = urllib.parse.urlsplit(COMMAND_NODE_URL)
+        cmd_host = parsed_cmd.hostname or ""
         while True:
             for flow in net_collector.pop_completed_flows():
                 dest_port = int(flow.get('Destination Port', 0))
@@ -680,8 +697,6 @@ def start_cicids() -> None:
 
                 # Check if this flow is AEGIS management traffic (port 8000, 5432, 5173/5174, P2P mesh)
                 # whether over 127.0.0.1 loopback OR across a VM/LAN bridge to the central Command Node.
-                cmd_url = getattr(args, "command_node_url", "")
-                cmd_host = urllib.parse.urlparse(cmd_url).hostname if cmd_url else None
                 is_command_node = bool(cmd_host and (dst_ip == cmd_host or src_ip == cmd_host))
 
                 # 1. Internal management, Command Node API & DB traffic
@@ -703,6 +718,10 @@ def start_cicids() -> None:
                         continue
                     verdict = engine.get_verdict(score)
                     flow_type = "NETWORK_FLOW"
+
+                # Telemetry feedback-loop prevention: do NOT ship internal management IPC or control fragments
+                if flow_type in ("INTERNAL_IPC", "CONTROL_FRAGMENT"):
+                    continue
 
                 print(f"[cicids]     port={dest_port:<5} [{flow_type:<16}] fwd_pkts={int(fwd_pkts):<4} "
                       f"bwd_pkts={int(bwd_pkts):<4} -> {score:.6f} ({verdict})")
