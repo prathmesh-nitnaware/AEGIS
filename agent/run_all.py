@@ -203,7 +203,28 @@ parser.add_argument(
     "--no-ip-prompt", dest="no_ip_prompt", action="store_true", default=False,
     help="Skip interactive Main Server IP prompt and use default/environment immediately.",
 )
+parser.add_argument(
+    "--live", dest="live_mode", action="store_true", default=False,
+    help="Enable LIVE OS response remediation (e.g. real iptables firewall drops and process termination).",
+)
+parser.add_argument(
+    "--response-mode", dest="response_mode", default=None, choices=["simulation", "real", "live"],
+    help="Set response enforcement mode ('simulation' or 'real').",
+)
 args, _ = parser.parse_known_args()
+
+# Configure response enforcement mode
+if getattr(args, "live_mode", False) or getattr(args, "response_mode", "") in ("real", "live"):
+    os.environ["AEGIS_RESPONSE_MODE"] = "real"
+    os.environ["AEGIS_LIVE_RESPONSE"] = "1"
+    os.environ["AEGIS_AUTO_REMEDIATE"] = "true"
+    print("\n[!] =================================================================")
+    print("    [ALERT] LIVE RESPONSE MODE ACTIVATED!")
+    print("    Real OS countermeasures (iptables, process kills) are ENABLED.")
+    print("    =================================================================\n")
+else:
+    if "AEGIS_RESPONSE_MODE" not in os.environ:
+        os.environ["AEGIS_RESPONSE_MODE"] = "simulation"
 
 
 def clean_server_url(raw_input: str) -> str:

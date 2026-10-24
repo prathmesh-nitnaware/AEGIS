@@ -248,6 +248,7 @@ def main() -> None:
     parser.add_argument("--agent", action="store_true", help="Launch this device as an Endpoint Agent Node")
     parser.add_argument("--server", action="store_true", help="Launch this device as the Main Server Node (default)")
     parser.add_argument("--update-only", action="store_true", help="Only update agent configuration files and exit")
+    parser.add_argument("--live", action="store_true", help="Enable LIVE automated remediation mode (real enforcement)")
     args, _ = parser.parse_known_args()
 
     py_exe = get_python_exe()
@@ -255,6 +256,10 @@ def main() -> None:
     print("=" * 80)
     print("      AEGIS AUTONOMOUS SWARM DEFENSE — UNIFIED PLATFORM LAUNCHER")
     print("=" * 80)
+
+    if args.live:
+        os.environ["AEGIS_AUTO_REMEDIATE"] = "true"
+        print("[!] Automated Response Mode: LIVE ENFORCEMENT ENABLED (AEGIS_AUTO_REMEDIATE=true)")
 
     # Determine node role (defaults to Server mode, or Agent mode if --agent specified)
     role = "agent" if args.agent else "server"
@@ -267,6 +272,8 @@ def main() -> None:
         agent_cmd = [py_exe, str(agent_script)]
         if args.server_ip:
             agent_cmd.extend(["--command-node", f"http://{args.server_ip}:8000"])
+        if args.live:
+            agent_cmd.append("--live")
         try:
             subprocess.run(agent_cmd, cwd=str(ROOT_DIR / "agent"))
         except KeyboardInterrupt:
@@ -296,6 +303,7 @@ def main() -> None:
     print(f"  [2/3] Blue Team SOC Defender Dashboard  -> http://{server_ip}:5173 (Local: http://127.0.0.1:5173)")
     print(f"  [3/3] Red Team Adversary C2 Console     -> http://{server_ip}:5174 (Local: http://127.0.0.1:5174)")
     print(f"  📡 Agent Telemetry Ingestion Endpoint   -> {command_url}/api/telemetry")
+    print(f"  ⚡ Automated Remediation Mode:          {'LIVE REAL ENFORCEMENT' if args.live else 'SAFE SIMULATION MODE'}")
     print("=" * 80)
 
     npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
