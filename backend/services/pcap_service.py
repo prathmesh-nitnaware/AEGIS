@@ -42,7 +42,7 @@ class PcapReplayerService:
         _PCAP_DIR.mkdir(parents=True, exist_ok=True)
         _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._pause_event = threading.Event()
@@ -363,10 +363,10 @@ class PcapReplayerService:
 
     def start_replay(self, filename: str, speed_multiplier: float = 1.0) -> Dict[str, Any]:
         """Starts real-time replaying and flow feature extraction of the given PCAP."""
-        with self._lock:
-            if self._status == "replaying":
-                self.stop_replay()
+        # Stop any active replay before acquiring the lock to start a new one
+        self.stop_replay()
 
+        with self._lock:
             pcap_path = _PCAP_DIR / filename
             if not pcap_path.exists():
                 pcap_path = _UPLOAD_DIR / filename
@@ -426,8 +426,9 @@ class PcapReplayerService:
         """Stops the active replay thread."""
         self._stop_event.set()
         self._pause_event.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=1.5)
+        th = self._thread
+        if th and th.is_alive() and th != threading.current_thread():
+            th.join(timeout=1.0)
         with self._lock:
             self._status = "idle"
 

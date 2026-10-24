@@ -525,31 +525,35 @@ def _execute_scenario_worker(scenario: str, target_id: str, target_ip: str, cust
             stages = [
                 ("Phase 1: PortScan Reconnaissance", "pcap_portscan", 20, "RECONNAISSANCE"),
                 ("Phase 2: Linux SSH Brute-Force & Meterpreter", "linux", 40, "EXPLOITATION"),
-                ("Phase 3: Windows Ransomware Dropper", "windows", 65, "IMPACT"),
-                ("Phase 4: Network SYN Flood DDoS Attack", "pcap_ddos", 85, "NETWORK_DENIAL"),
-                ("Phase 5: Agent Sabotage / Silence Infiltration", "sabotage", 100, "DEFENSE_EVASION"),
+                ("Phase 3: Windows Ransomware Dropper", "windows", 60, "PRIVILEGE_ESCALATION"),
+                ("Phase 4: Network SYN Flood DDoS Attack", "pcap_ddos", 80, "NETWORK_DENIAL"),
+                ("Phase 5: Agent Sabotage / Silence Infiltration", "sabotage", 95, "DEFENSE_EVASION"),
             ]
             for title, sc_name, prog, phase_tag in stages:
                 _append_log(f"[*] Executing Campaign Stage: {title}...", "INFO")
                 with _state_lock:
-                    _simulation_state["progress"] = prog - 5
+                    _simulation_state["progress"] = prog - 10 if prog > 10 else 5
                     _simulation_state["active_phase"] = phase_tag
 
-                if sc_name == "linux":
-                    simulate_linux_attacks.AGENT_ID = target_id
-                    simulate_linux_attacks.run_simulation(target_agent_id=target_id)
-                elif sc_name in {"windows", "file"}:
-                    simulate_windows_ransomware.AGENT_ID = target_id
-                    simulate_windows_ransomware.run_simulation(target_agent_id=target_id)
-                    _publish_lab_event(target_id, "suspicious_file", "file_activity_simulation", 0.72)
-                elif sc_name == "consensus":
-                    _publish_lab_event(target_id, "multi_node_consensus", "consensus_simulation", 0.88)
-                elif sc_name == "sabotage":
-                    simulate_silence_tamper.run_simulation(target_agent_id=target_id)
-                elif sc_name.startswith("pcap_"):
-                    from backend.services.pcap_service import pcap_service
-                    p_file = "syn_flood_ddos.pcap" if sc_name == "pcap_ddos" else "port_scan_recon.pcap"
-                    pcap_service.start_replay(p_file, speed_multiplier=12.0)
+                try:
+                    if sc_name == "linux":
+                        simulate_linux_attacks.AGENT_ID = target_id
+                        simulate_linux_attacks.run_simulation(target_agent_id=target_id)
+                    elif sc_name in {"windows", "file"}:
+                        simulate_windows_ransomware.AGENT_ID = target_id
+                        simulate_windows_ransomware.run_simulation(target_agent_id=target_id)
+                        _publish_lab_event(target_id, "suspicious_file", "file_activity_simulation", 0.72)
+                    elif sc_name == "consensus":
+                        _publish_lab_event(target_id, "multi_node_consensus", "consensus_simulation", 0.88)
+                    elif sc_name == "sabotage":
+                        simulate_silence_tamper.run_simulation(target_agent_id=target_id)
+                    elif sc_name.startswith("pcap_"):
+                        from backend.services.pcap_service import pcap_service
+                        p_file = "syn_flood_ddos.pcap" if sc_name == "pcap_ddos" else "port_scan_recon.pcap"
+                        pcap_service.start_replay(p_file, speed_multiplier=12.0)
+                except Exception as step_exc:
+                    logger.warning("Campaign sub-stage '%s' caught error: %s", sc_name, step_exc)
+                    _append_log(f"[!] Warning: Sub-stage {sc_name} encountered non-fatal error: {step_exc}", "WARNING")
 
                 with _state_lock:
                     _simulation_state["progress"] = prog

@@ -37,13 +37,25 @@ import {
 
 const KILL_CHAIN_STAGES = [
   { id: "RECONNAISSANCE", label: "1. Reconnaissance", desc: "Network & Port Discovery" },
-  { id: "WEAPONIZATION", label: "2. Weaponization", desc: "Payload & Exploit Staging" },
-  { id: "DELIVERY", label: "3. Delivery", desc: "Infiltration Transmission" },
-  { id: "EXPLOITATION", label: "4. Exploitation", desc: "Syscall & RCE Execution" },
-  { id: "PRIVILEGE_ESCALATION", label: "5. Escalation", desc: "Setuid(0) / VSS Purge" },
-  { id: "DEFENSE_EVASION", label: "6. Evasion", desc: "Air-gap / Silence Tamper" },
-  { id: "IMPACT", label: "7. Impact / Mitigation", desc: "AEGIS Swarm Neutralization" },
+  { id: "EXPLOITATION", label: "2. Exploitation", desc: "Syscall & RCE Execution" },
+  { id: "PRIVILEGE_ESCALATION", label: "3. Escalation", desc: "Setuid(0) / VSS Purge" },
+  { id: "NETWORK_DENIAL", label: "4. Network Denial", desc: "SYN Flood DDoS Traffic" },
+  { id: "DEFENSE_EVASION", label: "5. Evasion", desc: "Air-gap / Silence Tamper" },
+  { id: "IMPACT", label: "6. Swarm Defense", desc: "AEGIS Swarm Neutralization" },
 ];
+
+const normalizePhase = (phase) => {
+  if (!phase) return "";
+  const p = String(phase).toUpperCase();
+  if (p.includes("RECON")) return "RECONNAISSANCE";
+  if (p.includes("WEAPON")) return "RECONNAISSANCE";
+  if (p.includes("EXPLOIT") || p.includes("DELIVERY")) return "EXPLOITATION";
+  if (p.includes("ESCALAT") || p.includes("PRIVILEGE")) return "PRIVILEGE_ESCALATION";
+  if (p.includes("NETWORK") || p.includes("DENIAL") || p.includes("SATURATION") || p.includes("DDOS")) return "NETWORK_DENIAL";
+  if (p.includes("EVASION") || p.includes("SABOTAGE") || p.includes("SILENCE") || p.includes("MAINTENANCE")) return "DEFENSE_EVASION";
+  if (p.includes("IMPACT") || p.includes("CONSENSUS") || p.includes("ISOLATION") || p.includes("COMPLETED")) return "IMPACT";
+  return p;
+};
 
 export default function App() {
   const [gatewayUrl, setGatewayUrl] = useState("http://127.0.0.1:8000");
@@ -245,6 +257,7 @@ export default function App() {
         setLaunchError("Select a registered online AEGIS agent with a known source IP first.");
         return;
       }
+      const targetIp = isCustomMode ? (customIp || "127.0.0.1") : (selectedTarget?.ip || "127.0.0.1");
       const res = await fetch(`${gatewayUrl}/api/attack/launch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -823,8 +836,11 @@ export default function App() {
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "8px" }}>
               {KILL_CHAIN_STAGES.map((stg) => {
-                const isActive = attackState.active_phase === stg.id;
-                const isPassed = attackState.progress === 100 || (attackState.progress > 0 && KILL_CHAIN_STAGES.findIndex((s) => s.id === attackState.active_phase) > KILL_CHAIN_STAGES.findIndex((s) => s.id === stg.id));
+                const currentPhase = normalizePhase(attackState.active_phase);
+                const currentIdx = KILL_CHAIN_STAGES.findIndex((s) => s.id === currentPhase);
+                const stageIdx = KILL_CHAIN_STAGES.findIndex((s) => s.id === stg.id);
+                const isActive = attackState.is_running && currentPhase === stg.id;
+                const isPassed = attackState.progress === 100 || (!attackState.is_running && attackState.active_phase === "COMPLETED") || (currentIdx > -1 && currentIdx > stageIdx);
                 return (
                   <div
                     key={stg.id}
