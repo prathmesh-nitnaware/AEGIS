@@ -481,9 +481,10 @@ def _trigger_peer_voting_async(model: str, score: float, verdict: str, extra: di
         # B. Forward to Centralized Voting Hub (with vote_id for deduplication)
         try:
             import urllib.request
+            current_aid = getattr(args, "agent_id", None) or os.environ.get("AEGIS_AGENT_ID") or os.environ.get("AGENT_ID") or socket.gethostname()
             payload = {
                 "vote_id": vote_id,
-                "origin_agent_id": getattr(args, "agent_id", "agent-host-local"),
+                "origin_agent_id": current_aid,
                 "event_type": event_type,
                 "threat_score": score,
                 "confidence": 1.0,
@@ -491,15 +492,17 @@ def _trigger_peer_voting_async(model: str, score: float, verdict: str, extra: di
                 "pid": extra.get("pid"),
                 "target_file": extra.get("file_path") or extra.get("filename"),
             }
-            cmd_url = getattr(args, 'command_node_url', os.environ.get('COMMAND_NODE_URL', 'http://127.0.0.1:8000')).rstrip('/')
+            cmd_url = (getattr(args, 'command_node_url', None) or os.environ.get('COMMAND_NODE_URL') or COMMAND_NODE_URL or 'http://127.0.0.1:8000').rstrip('/')
             req = urllib.request.Request(
                 f"{cmd_url}/api/centralized/vote",
                 data=json.dumps(payload, default=str).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
             )
-            urllib.request.urlopen(req, timeout=2.0)
-        except Exception:
-            pass
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                if resp.status in (200, 201):
+                    print(f"  [+] Dispatched vote request for {model} (vote_id={vote_id}) to {cmd_url}/api/centralized/vote")
+        except Exception as exc:
+            print(f"[peer_voting] Central voting dispatch warning: {exc}")
 
     threading.Thread(target=_dispatch_vote, daemon=True).start()
 
