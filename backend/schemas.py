@@ -157,6 +157,14 @@ class RemoteActionAckPayload(BaseModel):
     result_details: Optional[Dict[str, Any]] = Field(default_factory=dict)
     details: Optional[Dict[str, Any]] = None
 
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, v: Any) -> str:
+        if isinstance(v, str):
+            clean = v.strip().upper()
+            return clean if clean in ALLOWED_ACTION_STATUSES.__args__ else "FAILED"
+        return "SUCCESS"
+
     def get_effective_details(self) -> Dict[str, Any]:
         return self.result_details or self.details or {}
 

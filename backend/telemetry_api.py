@@ -842,7 +842,7 @@ async def post_p2p_consensus(verdict: P2PConsensusPayload):
 
     # 4. Auto-enqueue remote mitigation action if High/Critical or action warrants it
     action_dict = None
-    response_act = verdict_dict.get("response_action")
+    response_act = verdict_dict.get("authorized_action") or decision["action"]
     if response_act in ("KILL_PROCESS", "SUSPEND_PROCESS", "RESUME_PROCESS", "QUARANTINE_FILE", "BLOCK_REMOTE_IP", "ISOLATE_HOST", "ALERT"):
         try:
             async with get_session() as session:
@@ -1065,7 +1065,7 @@ async def post_centralized_vote(
     verdict["response_policy_reason"] = decision["reason"]
     # ── Autonomous Remote Command Dispatcher: Auto-Enqueue Mitigation Actions ──
     action_dict = None
-    response_act = verdict.get("response_action")
+    response_act = verdict.get("authorized_action") or decision["action"]
     if response_act in ("KILL_PROCESS", "SUSPEND_PROCESS", "RESUME_PROCESS", "QUARANTINE_FILE", "BLOCK_REMOTE_IP", "ISOLATE_HOST", "ALERT"):
         try:
             async with get_session() as session:

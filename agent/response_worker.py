@@ -39,7 +39,7 @@ def _request(method: str, url: str, body: dict[str, Any] | None = None) -> dict[
 
 
 def _ack(action_id: str, status: str, details: dict[str, Any]) -> None:
-    payload = {"status": status, "result_details": details}
+    payload = {"status": str(status).strip().upper(), "result_details": details}
     _request(
         "POST", f"{BASE_URL}/api/agents/{AGENT_ID}/actions/{action_id}/ack", payload)
 
