@@ -44,32 +44,34 @@ import {
 } from "recharts";
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   AUTHENTIC ECG (ELECTROCARDIOGRAM) OSCILLOSCOPE MONITOR
+   AUTHENTIC NEON CYAN ECG (ELECTROCARDIOGRAM) OSCILLOSCOPE MONITOR
+   Matched to image aesthetic: deep navy grid, vibrant cyan glow, dual wave tracing,
+   synchronous heartbeat trigger on backend pulse.
    ═══════════════════════════════════════════════════════════════════════════ */
 function EcgHeartbeatMonitor({
   agent,
   isAlarmed,
   isSilent,
   latestTelemetry,
-  onTriggerSpike,
 }) {
   const canvasRef = useRef(null);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [bpm, setBpm] = useState(72);
-  const [stressPulse, setStressPulse] = useState(false);
   const [beaconFlash, setBeaconFlash] = useState(false);
   const [beaconAge, setBeaconAge] = useState(0);
   const lastHeartbeatTimeRef = useRef(Date.now());
+  const heartbeatPulseTriggerRef = useRef(0);
   const audioCtxRef = useRef(null);
   const animFrameRef = useRef(null);
   const beatCooldownRef = useRef(false);
 
-  // Synchronize with live backend heartbeat updates
+  // Synchronize tightly with live backend heartbeat updates
   useEffect(() => {
     lastHeartbeatTimeRef.current = Date.now();
+    heartbeatPulseTriggerRef.current = Date.now();
     setBeaconAge(0);
     setBeaconFlash(true);
-    const t = setTimeout(() => setBeaconFlash(false), 800);
+    const t = setTimeout(() => setBeaconFlash(false), 900);
     return () => clearTimeout(t);
   }, [agent.lastSeen, agent.last_seen, agent.cpu, agent.status]);
 
@@ -82,7 +84,7 @@ function EcgHeartbeatMonitor({
     return () => clearInterval(interval);
   }, []);
 
-  // Web Audio medical telemetry blip (subtle 880Hz / 40ms beep)
+  // Web Audio medical telemetry blip (crisp high-tech cardiac blip)
   const playBeep = () => {
     if (!soundEnabled) return;
     try {
@@ -97,13 +99,13 @@ function EcgHeartbeatMonitor({
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = "sine";
-      osc.frequency.setValueAtTime(stressPulse ? 1040 : 880, ctx.currentTime);
-      gain.gain.setValueAtTime(0.04, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.045);
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      gain.gain.setValueAtTime(0.045, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.05);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start();
-      osc.stop(ctx.currentTime + 0.05);
+      osc.stop(ctx.currentTime + 0.055);
     } catch {
       // Audio autoplay policy fallback
     }
@@ -113,21 +115,12 @@ function EcgHeartbeatMonitor({
   useEffect(() => {
     if (isAlarmed || isSilent) {
       setBpm(0); // Flatline Asystole
-    } else if (stressPulse) {
-      setBpm(138); // Tachycardia under threat
     } else {
       const baseCpu = typeof agent.cpu === "number" ? agent.cpu : 3.5;
-      const computedBpm = Math.min(115, Math.max(62, Math.round(68 + baseCpu * 0.8)));
+      const computedBpm = Math.min(115, Math.max(60, Math.round(68 + baseCpu * 0.75)));
       setBpm(computedBpm);
     }
-  }, [agent.cpu, isAlarmed, isSilent, stressPulse]);
-
-  // Handle Stress Pulse trigger
-  const triggerManualSpike = () => {
-    setStressPulse(true);
-    if (onTriggerSpike) onTriggerSpike();
-    setTimeout(() => setStressPulse(false), 6000);
-  };
+  }, [agent.cpu, isAlarmed, isSilent]);
 
   // Draw ECG Oscilloscope Canvas with responsive resize
   useEffect(() => {
@@ -137,7 +130,7 @@ function EcgHeartbeatMonitor({
 
     const updateDimensions = () => {
       if (canvas.parentElement) {
-        canvas.width = canvas.parentElement.clientWidth || 520;
+        canvas.width = canvas.parentElement.clientWidth || 540;
         canvas.height = 165;
       }
     };
@@ -149,92 +142,77 @@ function EcgHeartbeatMonitor({
     const midY = height / 2;
 
     const drawGrid = (w) => {
-      ctx.fillStyle = "#030806";
+      // Deep dark sleek glassmorphic background - clean & minimal (no grid lines)
+      const grad = ctx.createLinearGradient(0, 0, 0, height);
+      grad.addColorStop(0, "#020712");
+      grad.addColorStop(0.5, "#030c1c");
+      grad.addColorStop(1, "#020712");
+      ctx.fillStyle = grad;
       ctx.fillRect(0, 0, w, height);
 
-      // Minor grid (12px)
-      ctx.strokeStyle = "rgba(16, 185, 129, 0.07)";
+      // Subtle minimal center baseline guide line
+      ctx.strokeStyle = "rgba(14, 165, 233, 0.12)";
       ctx.lineWidth = 1;
-      for (let x = 0; x < w; x += 12) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-      }
-      for (let y = 0; y < height; y += 12) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
-      }
-
-      // Major grid (60px)
-      ctx.strokeStyle = "rgba(16, 185, 129, 0.18)";
-      ctx.lineWidth = 1;
-      for (let x = 0; x < w; x += 60) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-      }
-      for (let y = 0; y < height; y += 60) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
-      }
+      ctx.beginPath();
+      ctx.moveTo(0, midY);
+      ctx.lineTo(w, midY);
+      ctx.stroke();
     };
 
     drawGrid(canvas.width);
 
     let x = 0;
     let prevY = midY;
+    let prevEchoY = midY;
     let phase = 0;
-    const cycleLength = stressPulse ? 100 : 180;
+    const cycleLength = 170;
 
     const render = () => {
       const currentWidth = canvas.width;
-      const clearWidth = 14;
-      ctx.fillStyle = "rgba(3, 8, 6, 0.45)";
+      const clearWidth = 16;
+
+      // Clean sweep tail clearing old trace without any grid lines
+      ctx.fillStyle = "rgba(2, 7, 18, 0.42)";
       ctx.fillRect(x, 0, clearWidth, height);
 
-      // Re-draw grid lines in clear zone
-      ctx.strokeStyle = "rgba(16, 185, 129, 0.08)";
+      // Subtle center baseline in clear zone
+      ctx.strokeStyle = "rgba(14, 165, 233, 0.12)";
       ctx.lineWidth = 1;
-      for (let gx = Math.floor(x / 12) * 12; gx <= x + clearWidth; gx += 12) {
-        ctx.beginPath();
-        ctx.moveTo(gx, 0);
-        ctx.lineTo(gx, height);
-        ctx.stroke();
-      }
-      for (let gy = 0; gy < height; gy += 12) {
-        ctx.beginPath();
-        ctx.moveTo(x, gy);
-        ctx.lineTo(x + clearWidth, gy);
-        ctx.stroke();
-      }
+      ctx.beginPath();
+      ctx.moveTo(x, midY);
+      ctx.lineTo(x + clearWidth, midY);
+      ctx.stroke();
 
       let y = midY;
+      let echoY = midY;
 
       if (isAlarmed || isSilent) {
-        // Flatline Asystole with slight electrical noise
+        // Flatline Asystole
         y = midY + (Math.random() - 0.5) * 1.5;
+        echoY = midY + (Math.random() - 0.5) * 1.0;
       } else {
-        // Authentic P-Q-R-S-T Cardiac Cycle Waveform
+        // Synchronized P-Q-R-S-T Cardiac Cycle Waveform matched to user reference
         const cycleProgress = (phase % cycleLength) / cycleLength;
 
-        if (cycleProgress >= 0.05 && cycleProgress < 0.14) {
-          // P-wave
-          const pProg = (cycleProgress - 0.05) / 0.09;
-          y = midY - Math.sin(pProg * Math.PI) * 11;
-        } else if (cycleProgress >= 0.18 && cycleProgress < 0.21) {
-          // Q-wave
-          const qProg = (cycleProgress - 0.18) / 0.03;
-          y = midY + Math.sin(qProg * Math.PI) * 9;
-        } else if (cycleProgress >= 0.21 && cycleProgress < 0.28) {
-          // R-wave Spike
-          const rProg = (cycleProgress - 0.21) / 0.07;
-          const amp = stressPulse ? 80 : 64;
+        // Secondary smooth harmonic wave in background (dual wave aesthetic)
+        const smoothEcho = Math.sin(phase * 0.055) * 14 * Math.sin(phase * 0.018);
+        echoY = midY + smoothEcho;
+
+        if (cycleProgress >= 0.04 && cycleProgress < 0.13) {
+          // P-wave (atrial depolarization)
+          const pProg = (cycleProgress - 0.04) / 0.09;
+          y = midY - Math.sin(pProg * Math.PI) * 12;
+        } else if (cycleProgress >= 0.16 && cycleProgress < 0.20) {
+          // Q-wave (initial septal deflection)
+          const qProg = (cycleProgress - 0.16) / 0.04;
+          y = midY + Math.sin(qProg * Math.PI) * 14;
+        } else if (cycleProgress >= 0.20 && cycleProgress < 0.27) {
+          // Sharp R-wave Peak (tall cyan spike matched to image)
+          const rProg = (cycleProgress - 0.20) / 0.07;
+          // Dynamically scale peak if high CPU or fresh heartbeat
+          const timeSinceHb = (Date.now() - heartbeatPulseTriggerRef.current) / 1000;
+          const freshPulseBonus = timeSinceHb < 1.5 ? 12 : 0;
+          const amp = 68 + freshPulseBonus;
           y = midY - Math.sin(rProg * Math.PI) * amp;
 
           if (rProg > 0.4 && rProg < 0.6 && !beatCooldownRef.current) {
@@ -244,46 +222,65 @@ function EcgHeartbeatMonitor({
               beatCooldownRef.current = false;
             }, 300);
           }
-        } else if (cycleProgress >= 0.28 && cycleProgress < 0.33) {
-          // S-wave
-          const sProg = (cycleProgress - 0.28) / 0.05;
-          y = midY + Math.sin(sProg * Math.PI) * 20;
-        } else if (cycleProgress >= 0.44 && cycleProgress < 0.62) {
-          // T-wave
-          const tProg = (cycleProgress - 0.44) / 0.18;
+        } else if (cycleProgress >= 0.27 && cycleProgress < 0.33) {
+          // S-wave Dip (downward rebound below baseline)
+          const sProg = (cycleProgress - 0.27) / 0.06;
+          y = midY + Math.sin(sProg * Math.PI) * 26;
+        } else if (cycleProgress >= 0.42 && cycleProgress < 0.58) {
+          // T-wave (ventricular repolarization)
+          const tProg = (cycleProgress - 0.42) / 0.16;
           y = midY - Math.sin(tProg * Math.PI) * 18;
         } else {
-          // Isoelectric Baseline
+          // Isoelectric baseline with tiny realistic noise
           y = midY + (Math.random() - 0.5) * 1.6;
         }
       }
 
-      ctx.shadowBlur = 9;
-      ctx.shadowColor = isAlarmed || isSilent ? "#ef4444" : stressPulse ? "#f59e0b" : "#10b981";
-      ctx.strokeStyle = isAlarmed || isSilent ? "#f87171" : stressPulse ? "#fbbf24" : "#34d399";
-      ctx.lineWidth = 2.2;
+      // 1. Draw secondary wave trace (subtle dimmer blue echo wave from reference image)
+      ctx.shadowBlur = 4;
+      ctx.shadowColor = "rgba(14, 165, 233, 0.4)";
+      ctx.strokeStyle = "rgba(2, 132, 199, 0.4)";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(x === 0 ? 0 : x - 2, prevEchoY);
+      ctx.lineTo(x, echoY);
+      ctx.stroke();
+
+      // 2. Draw Primary Neon Cyan ECG Wave (Intense glow matched to image)
+      const primaryColor = isAlarmed || isSilent ? "#f87171" : "#38bdf8";
+      const glowColor = isAlarmed || isSilent ? "#ef4444" : "#00f0ff";
+
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = glowColor;
+      ctx.strokeStyle = primaryColor;
+      ctx.lineWidth = 2.4;
       ctx.lineCap = "round";
+      ctx.lineJoin = "round";
 
       ctx.beginPath();
       ctx.moveTo(x === 0 ? 0 : x - 2, prevY);
       ctx.lineTo(x, y);
       ctx.stroke();
 
-      ctx.shadowBlur = 14;
+      // 3. Draw Leading Laser / Phosphor Particle
+      ctx.shadowBlur = 16;
       ctx.shadowColor = "#ffffff";
-      ctx.fillStyle = isAlarmed || isSilent ? "#fca5a5" : "#ffffff";
+      ctx.fillStyle = isAlarmed || isSilent ? "#fca5a5" : "#e0f2fe";
       ctx.beginPath();
       ctx.arc(x, y, 2.5, 0, Math.PI * 2);
       ctx.fill();
 
+      // Reset shadow for next frame
       ctx.shadowBlur = 0;
       prevY = y;
+      prevEchoY = echoY;
       x += 2;
       phase += 2;
 
       if (x >= currentWidth) {
         x = 0;
         prevY = midY;
+        prevEchoY = midY;
       }
 
       animFrameRef.current = requestAnimationFrame(render);
@@ -295,7 +292,7 @@ function EcgHeartbeatMonitor({
       window.removeEventListener("resize", updateDimensions);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [agent.cpu, isAlarmed, isSilent, stressPulse, soundEnabled]);
+  }, [agent.cpu, isAlarmed, isSilent, soundEnabled]);
 
   return (
     <div className="ecg-monitor-frame">
@@ -304,7 +301,7 @@ function EcgHeartbeatMonitor({
           <div className="ecg-pulse-indicator">
             <span
               className={`ecg-dot ${
-                isAlarmed || isSilent ? "dead" : stressPulse ? "warning" : "alive"
+                isAlarmed || isSilent ? "dead" : "alive"
               }`}
             />
             <span className="ecg-label">
@@ -314,10 +311,8 @@ function EcgHeartbeatMonitor({
           <span className="ecg-status-text">
             {isAlarmed || isSilent ? (
               <strong style={{ color: "#f87171" }}>ASYSTOLE / SILENT ALARM</strong>
-            ) : stressPulse ? (
-              <strong style={{ color: "#fbbf24" }}>TACHYCARDIA / ANOMALY DETECTED</strong>
             ) : (
-              <strong style={{ color: "#34d399", display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <strong style={{ color: "#38bdf8", display: "inline-flex", alignItems: "center", gap: 6 }}>
                 SINUS RHYTHM (8.0s) · BEACON: {beaconAge}s AGO
                 {beaconFlash && (
                   <span className="beacon-flash-tag">
@@ -345,15 +340,6 @@ function EcgHeartbeatMonitor({
             {soundEnabled ? <Volume2 size={12} /> : <VolumeX size={12} />}
             <span>{soundEnabled ? "ON" : "MUTE"}</span>
           </button>
-
-          <button
-            className="btn-ecg-action spike"
-            onClick={triggerManualSpike}
-            title="Inject simulated elevated ventricular spike into ECG trace"
-          >
-            <Zap size={12} />
-            <span>SPIKE</span>
-          </button>
         </div>
       </div>
 
@@ -364,13 +350,6 @@ function EcgHeartbeatMonitor({
           className="ecg-canvas"
         />
         <div className="ecg-sweep-overlay" />
-        <div className="ecg-crt-scanlines" />
-
-        <div className="ecg-telemetry-overlay">
-          <span>SWEEP: 25mm/s</span>
-          <span>LATENCY: &lt;10ms (LAN)</span>
-          <span>S/N RATIO: 99.4%</span>
-        </div>
       </div>
     </div>
   );
@@ -378,6 +357,8 @@ function EcgHeartbeatMonitor({
 
 /* ═══════════════════════════════════════════════════════════════════════════
    LIVE MACHINE CPU USAGE & HARDWARE TELEMETRY MONITOR (RIGHT HALF)
+   Full visual graph representation: rolling stream area chart + load density
+   bars + multi-core activity visualizer.
    ═══════════════════════════════════════════════════════════════════════════ */
 function MachineCpuUsageMonitor({ agent, agentId, latestTelemetry }) {
   const currentCpu = typeof agent.cpu === "number" ? agent.cpu : 3.8;
@@ -386,13 +367,13 @@ function MachineCpuUsageMonitor({ agent, agentId, latestTelemetry }) {
   // Rolling CPU history populated from live backend heartbeats
   const [cpuHistory, setCpuHistory] = useState(() => {
     const now = Date.now();
-    return Array.from({ length: 20 }, (_, i) => ({
-      time: new Date(now - (20 - i) * 3000).toLocaleTimeString([], {
+    return Array.from({ length: 24 }, (_, i) => ({
+      time: new Date(now - (24 - i) * 3000).toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
       }),
-      cpu: Math.max(0.4, parseFloat((currentCpu + Math.sin(i * 0.7) * 1.1).toFixed(1))),
+      cpu: Math.max(0.4, parseFloat((currentCpu + Math.sin(i * 0.7) * 1.2).toFixed(1))),
     }));
   });
 
@@ -400,6 +381,13 @@ function MachineCpuUsageMonitor({ agent, agentId, latestTelemetry }) {
   const peakCpu = useMemo(() => {
     const maxVal = Math.max(...cpuHistory.map((h) => h.cpu), currentCpu);
     return maxVal.toFixed(1);
+  }, [cpuHistory, currentCpu]);
+
+  // Average CPU over window
+  const avgCpu = useMemo(() => {
+    if (cpuHistory.length === 0) return currentCpu.toFixed(1);
+    const sum = cpuHistory.reduce((acc, curr) => acc + curr.cpu, 0);
+    return (sum / cpuHistory.length).toFixed(1);
   }, [cpuHistory, currentCpu]);
 
   // Append new CPU points as backend heartbeats and pulses arrive
@@ -411,7 +399,7 @@ function MachineCpuUsageMonitor({ agent, agentId, latestTelemetry }) {
         second: "2-digit",
       });
       setCpuHistory((prev) => [
-        ...prev.slice(-24),
+        ...prev.slice(-28),
         { time: timeStr, cpu: parseFloat(agent.cpu.toFixed(1)) },
       ]);
     }
@@ -449,14 +437,48 @@ function MachineCpuUsageMonitor({ agent, agentId, latestTelemetry }) {
       </div>
 
       <div className="cpu-body-grid">
-        {/* Left: Big Numeric Readout & Specs */}
+        {/* Left: Dynamic Gauges & Mini Bar Chart */}
         <div className="cpu-kpi-pane">
           <div className="cpu-big-stat">
             <span className="cpu-percent-number" style={{ color: theme.color }}>
               {currentCpu.toFixed(1)}
               <small className="cpu-unit">%</small>
             </span>
-            <span className="cpu-stat-caption">REAL-TIME CPU USAGE</span>
+            <span className="cpu-stat-caption">REAL-TIME UTILIZATION</span>
+          </div>
+
+          {/* Mini CPU Load Level Gauges */}
+          <div className="cpu-load-levels">
+            <div className="load-level-bar-container">
+              <div className="load-level-label">
+                <span>LOAD</span>
+                <strong>{currentCpu.toFixed(1)}%</strong>
+              </div>
+              <div className="load-level-track">
+                <div
+                  className="load-level-fill"
+                  style={{
+                    width: `${Math.min(100, Math.max(4, currentCpu))}%`,
+                    background: `linear-gradient(90deg, #38bdf8, ${theme.color})`,
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="load-level-bar-container">
+              <div className="load-level-label">
+                <span>RAM</span>
+                <strong>{typeof memoryPercent === "number" ? memoryPercent.toFixed(1) : memoryPercent}%</strong>
+              </div>
+              <div className="load-level-track">
+                <div
+                  className="load-level-fill ram"
+                  style={{
+                    width: `${Math.min(100, typeof memoryPercent === "number" ? memoryPercent : 42.5)}%`,
+                  }}
+                />
+              </div>
+            </div>
           </div>
 
           <div className="cpu-specs-compact">
@@ -465,46 +487,55 @@ function MachineCpuUsageMonitor({ agent, agentId, latestTelemetry }) {
               <strong style={{ color: "#f1f5f9" }}>{peakCpu}%</strong>
             </div>
             <div className="spec-compact-item">
-              <span>RAM:</span>
-              <strong style={{ color: "#34d399" }}>
-                {typeof memoryPercent === "number" ? memoryPercent.toFixed(1) : memoryPercent}%
-              </strong>
-            </div>
-            <div className="spec-compact-item">
-              <span>CORES:</span>
-              <strong style={{ color: "#a855f7" }}>8 Virtual</strong>
+              <span>AVG:</span>
+              <strong style={{ color: "#38bdf8" }}>{avgCpu}%</strong>
             </div>
             <div className="spec-compact-item">
               <span>BEACON:</span>
-              <strong style={{ color: "#38bdf8" }}>Verified</strong>
+              <strong style={{ color: "#34d399" }}>Live</strong>
             </div>
           </div>
         </div>
 
-        {/* Right: Rolling CPU Load Stream Area Chart */}
+        {/* Right: Full-Fledged Rolling Utilization Graph */}
         <div className="cpu-chart-pane">
           <div className="cpu-chart-header">
-            <span>ROLLING CPU UTILIZATION (HEARTBEAT STREAM)</span>
-            <span style={{ fontSize: 9, color: "#64748b" }}>INTERVAL: 8.0s</span>
+            <span>REAL-TIME CPU TELEMETRY GRAPH</span>
+            <span style={{ fontSize: 9, color: "#64748b" }}>POLL: 8.0s INTERVAL</span>
           </div>
+
           <div className="cpu-mini-chart">
-            <ResponsiveContainer width="100%" height={100}>
-              <AreaChart data={cpuHistory}>
+            <ResponsiveContainer width="100%" height={118}>
+              <AreaChart data={cpuHistory} margin={{ top: 6, right: 8, left: -24, bottom: 0 }}>
                 <defs>
                   <linearGradient id="cpuAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.45} />
-                    <stop offset="100%" stopColor="#0284c7" stopOpacity={0.0} />
+                    <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.55} />
+                    <stop offset="60%" stopColor="#0284c7" stopOpacity={0.15} />
+                    <stop offset="100%" stopColor="#0369a1" stopOpacity={0.0} />
                   </linearGradient>
                 </defs>
-                <YAxis domain={[0, 100]} hide={true} />
+                <XAxis
+                  dataKey="time"
+                  tick={{ fontSize: 9, fill: "#64748b" }}
+                  interval="preserveStartEnd"
+                  axisLine={{ stroke: "rgba(56, 189, 248, 0.2)" }}
+                  tickLine={false}
+                />
+                <YAxis
+                  domain={[0, 100]}
+                  tick={{ fontSize: 8, fill: "#64748b" }}
+                  axisLine={{ stroke: "rgba(56, 189, 248, 0.2)" }}
+                  tickLine={false}
+                  ticks={[0, 25, 50, 75, 100]}
+                />
                 <Tooltip
                   content={({ active, payload }) => {
                     if (!active || !payload || !payload.length) return null;
                     const d = payload[0].payload;
                     return (
                       <div className="cpu-tooltip">
-                        <span>{d.time}</span>
-                        <strong>{d.cpu}% Load</strong>
+                        <span style={{ color: "#94a3b8" }}>{d.time}</span>
+                        <strong style={{ color: "#38bdf8" }}>{d.cpu}% Utilization</strong>
                       </div>
                     );
                   }}
@@ -520,15 +551,6 @@ function MachineCpuUsageMonitor({ agent, agentId, latestTelemetry }) {
                 />
               </AreaChart>
             </ResponsiveContainer>
-          </div>
-          <div className="cpu-bar-track">
-            <div
-              className="cpu-bar-fill"
-              style={{
-                width: `${Math.min(100, Math.max(3, currentCpu))}%`,
-                background: `linear-gradient(90deg, #38bdf8, ${theme.color})`,
-              }}
-            />
           </div>
         </div>
       </div>
@@ -718,34 +740,6 @@ export default function AgentMachineCockpit({
     }
   };
 
-  // Simulate Attack Anomaly
-  const handleSimulateAttack = async () => {
-    try {
-      const simulatedPayload = {
-        agent_id: agentId,
-        ip: agentIp,
-        model: "zero_day",
-        process: "powershell_anomaly.exe",
-        pid: Math.floor(Math.random() * 8000) + 1000,
-        threat_score: 0.884,
-        predicted_class: "Suspicious_Process_Tree",
-        syscall: "sys_execve",
-        timestamp: Date.now(),
-        cpu: 24.5,
-        details: "Simulated memory injection & process credential dump",
-      };
-      await fetch(`${API_BASE}/api/telemetry`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(simulatedPayload),
-      });
-      setPulseToast(`Simulated attack anomaly ingested for ${agentId} (88.4% threat score)`);
-      setTimeout(() => setPulseToast(null), 4000);
-    } catch (err) {
-      console.error("Simulation error:", err);
-    }
-  };
-
   // Export Machine Report JSON
   const handleExportReport = () => {
     const reportData = {
@@ -815,10 +809,6 @@ export default function AgentMachineCockpit({
 
           <button className="btn-cockpit-action" onClick={handleTestPulse} title="Trigger test telemetry pulse">
             <RefreshCw size={13} /> Test Pulse
-          </button>
-
-          <button className="btn-cockpit-action warning" onClick={handleSimulateAttack} title="Inject simulated anomaly">
-            <Zap size={13} /> Simulate Anomaly
           </button>
 
           <button className="btn-cockpit-action" onClick={handleExportReport} title="Export machine diagnostics report">
@@ -950,7 +940,6 @@ export default function AgentMachineCockpit({
           isAlarmed={isAlarmed}
           isSilent={isSilent}
           latestTelemetry={machineEvents[0]}
-          onTriggerSpike={handleSimulateAttack}
         />
 
         {/* Right Side: Live Machine CPU Usage & Hardware Telemetry */}
@@ -1270,9 +1259,6 @@ export default function AgentMachineCockpit({
             <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
               <button className="btn-cockpit-action" onClick={handleTestPulse}>
                 <RefreshCw size={13} /> Trigger Test Pulse for {agentId}
-              </button>
-              <button className="btn-cockpit-action warning" onClick={handleSimulateAttack}>
-                <Zap size={13} /> Simulate Sample Anomaly
               </button>
             </div>
           </div>

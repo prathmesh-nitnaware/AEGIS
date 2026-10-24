@@ -3040,11 +3040,11 @@ tr.highlight-row {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .ecg-monitor-frame {
-  background: #020604;
-  border: 1px solid rgba(16, 185, 129, 0.35);
+  background: #020914;
+  border: 1px solid rgba(14, 165, 233, 0.35);
   border-radius: 12px;
   padding: 14px 18px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.8), inset 0 0 20px rgba(16, 185, 129, 0.05);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.8), inset 0 0 20px rgba(14, 165, 233, 0.05);
   position: relative;
   overflow: hidden;
 }
@@ -3057,7 +3057,7 @@ tr.highlight-row {
   gap: 12px;
   margin-bottom: 10px;
   padding-bottom: 8px;
-  border-bottom: 1px solid rgba(16, 185, 129, 0.2);
+  border-bottom: 1px solid rgba(14, 165, 233, 0.2);
 }
 
 .ecg-title-block {
@@ -3086,8 +3086,8 @@ tr.highlight-row {
 }
 
 .ecg-dot.alive {
-  background: #10b981;
-  box-shadow: 0 0 10px #10b981;
+  background: #38bdf8;
+  box-shadow: 0 0 10px #38bdf8;
 }
 
 .ecg-dot.warning {
@@ -3105,7 +3105,7 @@ tr.highlight-row {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.8px;
-  color: #34d399;
+  color: #38bdf8;
 }
 
 .ecg-status-text {
@@ -3123,8 +3123,8 @@ tr.highlight-row {
   display: flex;
   align-items: baseline;
   gap: 4px;
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.35);
+  background: rgba(14, 165, 233, 0.1);
+  border: 1px solid rgba(14, 165, 233, 0.35);
   border-radius: 6px;
   padding: 3px 10px;
 }
@@ -3133,22 +3133,22 @@ tr.highlight-row {
   font-family: var(--font-mono, monospace);
   font-size: 16px;
   font-weight: 800;
-  color: #34d399;
+  color: #38bdf8;
 }
 
 .bpm-unit {
   font-size: 10px;
   font-weight: 700;
-  color: #10b981;
+  color: #0284c7;
 }
 
 .btn-ecg-action {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: rgba(6, 78, 59, 0.4);
-  border: 1px solid rgba(16, 185, 129, 0.35);
-  color: #6ee7b7;
+  background: rgba(12, 74, 110, 0.4);
+  border: 1px solid rgba(14, 165, 233, 0.35);
+  color: #7dd3fc;
   padding: 4px 9px;
   border-radius: 5px;
   font-family: var(--font-mono, monospace);
@@ -3159,32 +3159,22 @@ tr.highlight-row {
 }
 
 .btn-ecg-action:hover {
-  background: rgba(16, 185, 129, 0.3);
+  background: rgba(14, 165, 233, 0.3);
   color: #ffffff;
 }
 
 .btn-ecg-action.active {
-  background: rgba(16, 185, 129, 0.25);
-  border-color: #10b981;
-  color: #34d399;
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.25);
-}
-
-.btn-ecg-action.spike {
-  border-color: rgba(245, 158, 11, 0.4);
-  color: #fbbf24;
-}
-
-.btn-ecg-action.spike:hover {
-  background: rgba(245, 158, 11, 0.25);
-  color: #ffffff;
+  background: rgba(14, 165, 233, 0.25);
+  border-color: #38bdf8;
+  color: #e0f2fe;
+  box-shadow: 0 0 8px rgba(14, 165, 233, 0.25);
 }
 
 .ecg-canvas-wrapper {
   position: relative;
   width: 100%;
   height: 165px;
-  background: #020604;
+  background: #020914;
   border-radius: 6px;
   overflow: hidden;
 }
@@ -3203,8 +3193,8 @@ tr.highlight-row {
   height: 100%;
   background: repeating-linear-gradient(
     0deg,
-    rgba(0, 0, 0, 0.15),
-    rgba(0, 0, 0, 0.15) 1px,
+    rgba(0, 0, 0, 0.18),
+    rgba(0, 0, 0, 0.18) 1px,
     transparent 1px,
     transparent 2px
   );
@@ -3219,7 +3209,7 @@ tr.highlight-row {
   gap: 14px;
   font-family: var(--font-mono, monospace);
   font-size: 9px;
-  color: rgba(52, 211, 153, 0.65);
+  color: rgba(56, 189, 248, 0.7);
   pointer-events: none;
 }
 
@@ -3229,6 +3219,7 @@ tr.highlight-row {
   grid-template-columns: 1fr 1fr;
   gap: 20px;
   width: 100%;
+  align-items: stretch;
 }
 
 @media (max-width: 1200px) {
@@ -3241,9 +3232,9 @@ tr.highlight-row {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: rgba(16, 185, 129, 0.25);
-  border: 1px solid #10b981;
-  color: #34d399;
+  background: rgba(14, 165, 233, 0.25);
+  border: 1px solid #38bdf8;
+  color: #7dd3fc;
   font-size: 9px;
   font-weight: 800;
   padding: 1px 6px;
@@ -3252,7 +3243,7 @@ tr.highlight-row {
 }
 
 @keyframes beaconGlow {
-  0% { transform: scale(1.15); box-shadow: 0 0 12px #10b981; }
+  0% { transform: scale(1.15); box-shadow: 0 0 12px #38bdf8; }
   100% { transform: scale(1); box-shadow: none; }
 }
 
@@ -3260,8 +3251,8 @@ tr.highlight-row {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #34d399;
-  box-shadow: 0 0 6px #34d399;
+  background: #38bdf8;
+  box-shadow: 0 0 6px #38bdf8;
 }
 
 /* Machine CPU Usage & Hardware Telemetry Monitor Frame */
@@ -3323,7 +3314,7 @@ tr.highlight-row {
   display: grid;
   grid-template-columns: 140px 1fr;
   gap: 16px;
-  align-items: center;
+  align-items: stretch;
   height: 165px;
 }
 
@@ -3350,14 +3341,14 @@ tr.highlight-row {
 
 .cpu-percent-number {
   font-family: var(--font-mono, monospace);
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 900;
   line-height: 1.1;
   letter-spacing: -1px;
 }
 
 .cpu-unit {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
   margin-left: 2px;
 }
@@ -3369,11 +3360,51 @@ tr.highlight-row {
   letter-spacing: 0.5px;
 }
 
+.cpu-load-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.load-level-bar-container {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.load-level-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  font-weight: 700;
+  color: #94a3b8;
+  font-family: var(--font-mono, monospace);
+}
+
+.load-level-track {
+  width: 100%;
+  height: 4px;
+  background: rgba(15, 23, 42, 0.85);
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.load-level-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.load-level-fill.ram {
+  background: linear-gradient(90deg, #0ea5e9, #a855f7);
+}
+
 .cpu-specs-compact {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 8px;
+  gap: 3px;
   font-size: 10px;
 }
 
@@ -3399,28 +3430,12 @@ tr.highlight-row {
   font-size: 10px;
   font-weight: 600;
   color: #94a3b8;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .cpu-mini-chart {
   width: 100%;
-  height: 105px;
-}
-
-.cpu-bar-track {
-  width: 100%;
-  height: 6px;
-  background: rgba(15, 23, 42, 0.8);
-  border: 1px solid rgba(56, 189, 248, 0.2);
-  border-radius: 4px;
-  overflow: hidden;
-  margin-top: 6px;
-}
-
-.cpu-bar-fill {
-  height: 100%;
-  border-radius: 4px;
-  transition: width 0.3s ease;
+  height: 135px;
 }
 
 .cpu-tooltip {

@@ -187,7 +187,20 @@ def resolve_server_ip(default_ip: str, cli_ip: Optional[str] = None) -> str:
     if env_ip:
         cleaned_env = clean_and_validate_ip(env_ip)
         if cleaned_env:
-            return cleaned_env
+            try:
+                import psutil
+                local_ips = {
+                    addr.address
+                    for addrs in psutil.net_if_addrs().values()
+                    for addr in addrs
+                    if addr.family == socket.AF_INET
+                }
+                if cleaned_env in local_ips:
+                    return cleaned_env
+                print(f"[*] Note: Stale IP '{cleaned_env}' in .env is not active on this host. Auto-switching to live LAN IP '{default_ip}'.")
+                return default_ip
+            except Exception:
+                return cleaned_env
 
     return default_ip
 
