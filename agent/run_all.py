@@ -135,6 +135,25 @@ try:
 except Exception:
     LOCAL_IPS = {"127.0.0.1", "::1", "localhost", "0.0.0.0", ""}
 
+
+def get_local_agent_ip() -> str:
+    """Detect LAN/local IP address of this machine."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.2)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
+
+
+LOCAL_AGENT_IP = get_local_agent_ip()
+
 # ---------------------------------------------------------------------------
 # CLI: --os override (manual, for testing only -- auto-detect is default)
 # ---------------------------------------------------------------------------
@@ -236,27 +255,42 @@ def save_agent_server_url(server_url: str) -> None:
         pass
 
 
-default_target = (
-    args.command_node_url
-    or os.environ.get("COMMAND_NODE_URL")
-    or (f"http://{os.environ.get('MAIN_SERVER_IP')}:8000" if os.environ.get("MAIN_SERVER_IP") else None)
-    or "http://127.0.0.1:8000"
-)
+# Resolve Main Server target URL with strict precedence:
+# 1. Explicit CLI argument (--command-node or --server)
+# 2. MAIN_SERVER_IP from environment or .env (if non-empty and non-loopback)
+# 3. COMMAND_NODE_URL from environment or .env (if non-loopback)
+# 4. Fallback to MAIN_SERVER_IP / COMMAND_NODE_URL / default loopback
+if getattr(args, "command_node_url", None):
+    default_target = args.command_node_url
+elif os.environ.get("MAIN_SERVER_IP") and os.environ.get("MAIN_SERVER_IP").strip() not in ("127.0.0.1", "localhost", "::1", ""):
+    default_target = f"http://{os.environ.get('MAIN_SERVER_IP').strip()}:8000"
+elif os.environ.get("COMMAND_NODE_URL") and not os.environ.get("COMMAND_NODE_URL").startswith("http://127.0.0.1"):
+    default_target = os.environ.get("COMMAND_NODE_URL").strip()
+elif os.environ.get("MAIN_SERVER_IP") and os.environ.get("MAIN_SERVER_IP").strip():
+    default_target = f"http://{os.environ.get('MAIN_SERVER_IP').strip()}:8000"
+elif os.environ.get("COMMAND_NODE_URL") and os.environ.get("COMMAND_NODE_URL").strip():
+    default_target = os.environ.get("COMMAND_NODE_URL").strip()
+else:
+    default_target = "http://127.0.0.1:8000"
 
 COMMAND_NODE_URL = clean_server_url(default_target)
+
+# Synchronize into environment and local .env so all child threads inherit it
+parsed_target = urllib.parse.urlsplit(COMMAND_NODE_URL)
+target_server_ip = parsed_target.hostname or "127.0.0.1"
+os.environ["MAIN_SERVER_IP"] = target_server_ip
+os.environ["COMMAND_NODE_URL"] = COMMAND_NODE_URL
+save_agent_server_url(COMMAND_NODE_URL)
 
 print("\n" + "=" * 80)
 print("      AEGIS ENDPOINT AGENT — OS-AWARE TELEMETRY & THREAT DEFENSE")
 print("=" * 80)
 print(f"  Target Main Server:  {COMMAND_NODE_URL}")
+print(f"  Main Server IP:      {target_server_ip}")
 print("  This agent will stream live ML telemetry, verdicts, and heartbeats to this server.")
 print("-" * 80)
 
-if args.command_node_url:
-    save_agent_server_url(COMMAND_NODE_URL)
-
 test_server_connectivity(COMMAND_NODE_URL)
-os.environ["COMMAND_NODE_URL"] = COMMAND_NODE_URL
 
 # ---------------------------------------------------------------------------
 # Load Balancer — initialise BEFORE starting collectors so every telemetry
@@ -955,13 +989,14 @@ def main():
                     # Use get_active_url() so heartbeats follow load-balancer
                     # failovers automatically at each pulse interval.
                     hb_target = get_active_url()
+                    payload["ip"] = LOCAL_AGENT_IP
                     data = json.dumps(payload).encode("utf-8")
                     req = urllib.request.Request(
                         f"{hb_target}/api/heartbeat",
                         data=data,
                         headers={"Content-Type": "application/json"},
                     )
-                    urllib.request.urlopen(req, timeout=2.0)
+                    urllib.request.urlopen(req, timeout=3.0)
                 except Exception:
                     pass
 
@@ -1004,11 +1039,60 @@ def main():
     print("Starting telemetry collection...\n")
     results = run_collectors(OS_NAME, START_FNS)
 
+    # 1. Send immediate baseline registration event to Main Server
+    try:
+        save_event(
+            "zero_day",
+            0.01,
+            "BENIGN",
+            process_name="aegis_agent_service",
+            process="aegis_agent_service",
+            user_name="SYSTEM",
+            status="agent_online",
+            ip=LOCAL_AGENT_IP,
+            details=f"Agent '{agent_id}' online and streaming live telemetry to {COMMAND_NODE_URL}",
+        )
+        print(f"[run_all] [+] Shipped initial baseline registration telemetry to {COMMAND_NODE_URL}/api/telemetry")
+    except Exception as exc:
+        print(f"[run_all] [!] Note: Initial baseline telemetry dispatch: {exc}")
+
+    # 2. Continuous live baseline telemetry pulse: periodically streams live system health and process metrics
+    def _telemetry_pulse_loop():
+        import psutil
+        while not stop_agent_event.is_set():
+            stop_agent_event.wait(8.0)
+            if stop_agent_event.is_set():
+                break
+            try:
+                cpu = psutil.cpu_percent(interval=None)
+                mem = psutil.virtual_memory().percent
+                pids = len(psutil.pids())
+                save_event(
+                    "zero_day",
+                    0.02,
+                    "BENIGN",
+                    process_name="system_telemetry_pulse",
+                    process="system_telemetry_pulse",
+                    user_name="SYSTEM",
+                    status="live_pulse",
+                    cpu_percent=cpu,
+                    memory_percent=mem,
+                    active_processes=pids,
+                    ip=LOCAL_AGENT_IP,
+                    details=f"Live telemetry pulse | CPU: {cpu}% | RAM: {mem}% | PIDs: {pids}",
+                )
+            except Exception:
+                pass
+
+    telemetry_thread = threading.Thread(target=_telemetry_pulse_loop, name="aegis-telemetry-pulse", daemon=True)
+    telemetry_thread.start()
+    print(f"[run_all] Continuous live telemetry streamer active (streaming every 8.0s to {COMMAND_NODE_URL})\n")
+
     # ===========================================================================
     # Keep running until user interrupt or server shutdown cascade
     # ===========================================================================
 
-    print("\n[run_all] All available collectors started. Press Ctrl+C to stop.\n")
+    print("[run_all] All available collectors started. Press Ctrl+C to stop.\n")
     try:
         while not stop_agent_event.is_set():
             stop_agent_event.wait(timeout=0.5)

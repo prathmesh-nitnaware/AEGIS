@@ -432,6 +432,8 @@ class SilenceDetector:
                 silence_duration = now - agent.last_seen
                 if silence_duration >= self.silence_threshold and not agent.alarm_raised:
                     agent.alarm_raised = True
+                    agent.status = "silent"
+                    agent.cpu = 0.0
                     alarm_payload = {
                         "agent_id": agent_id,
                         "event": "SILENT_ALARM",
@@ -439,8 +441,10 @@ class SilenceDetector:
                         "silence_duration": round(silence_duration, 2),
                         "silence_threshold": self.silence_threshold,
                         "last_seen_timestamp": agent.last_seen,
-                        "last_reported_status": agent.status,
+                        "last_reported_status": "silent",
                         "timestamp": int(now),
+                        "ip": getattr(agent, "ip", "127.0.0.1"),
+                        "message": f"{agent_id} is SILENT",
                     }
                     alarms_to_fire.append(alarm_payload)
 
@@ -513,17 +517,23 @@ class SilenceDetector:
 
         Returns None if agent_id is not tracked.
         """
+        now = time.time()
         with self._lock:
             agent = self._agents.get(agent_id)
             if not agent:
                 return None
+            silence_dur = round(now - agent.last_seen, 2)
+            is_graceful = agent.status in ("OFFLINE_GRACEFUL", "shutdown", "shutting_down")
+            is_silent = (not is_graceful) and (silence_dur >= self.silence_threshold or agent.alarm_raised)
+            status = "OFFLINE_GRACEFUL" if is_graceful else ("silent" if is_silent else agent.status)
             return {
                 "agent_id": agent.agent_id,
                 "last_seen": agent.last_seen,
-                "silence_duration": round(time.time() - agent.last_seen, 2),
-                "status": agent.status,
-                "cpu": agent.cpu,
-                "alarm_raised": agent.alarm_raised,
+                "silence_duration": silence_dur,
+                "status": status,
+                "cpu": agent.cpu if (not is_silent and not is_graceful) else 0.0,
+                "alarm_raised": is_silent,
+                "ip": getattr(agent, "ip", "127.0.0.1"),
             }
 
     def list_agents(self) -> List[Dict[str, Any]]:
@@ -535,18 +545,23 @@ class SilenceDetector:
         """
         now = time.time()
         with self._lock:
-            return [
-                {
+            results = []
+            for agent in self._agents.values():
+                silence_dur = round(now - agent.last_seen, 2)
+                is_graceful = agent.status in ("OFFLINE_GRACEFUL", "shutdown", "shutting_down")
+                is_silent = (not is_graceful) and (silence_dur >= self.silence_threshold or agent.alarm_raised)
+                status = "OFFLINE_GRACEFUL" if is_graceful else ("silent" if is_silent else agent.status)
+                alarmed = is_silent
+                results.append({
                     "agent_id": agent.agent_id,
                     "last_seen": agent.last_seen,
-                    "silence_duration": round(now - agent.last_seen, 2),
-                    "status": agent.status,
-                    "cpu": agent.cpu,
-                    "alarm_raised": agent.alarm_raised,
+                    "silence_duration": silence_dur,
+                    "status": status,
+                    "cpu": agent.cpu if (not is_silent and not is_graceful) else 0.0,
+                    "alarm_raised": alarmed,
                     "ip": getattr(agent, "ip", "127.0.0.1"),
-                }
-                for agent in self._agents.values()
-            ]
+                })
+            return results
 
 
 # ===========================================================================

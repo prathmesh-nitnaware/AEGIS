@@ -78,12 +78,16 @@ load_env_file(ROOT_DIR / ".env")
 
 
 def get_python_exe() -> str:
+    # If the current process is already running in a virtual environment, prefer it
+    if sys.executable and any(k in sys.executable.lower() for k in ("venv", ".venv")):
+        return sys.executable
     venv_win = ROOT_DIR / ".venv" / "Scripts" / "python.exe"
+    venv_standard_win = ROOT_DIR / "venv" / "Scripts" / "python.exe"
     venv_nix = ROOT_DIR / ".venv" / "bin" / "python"
-    if venv_win.exists():
-        return str(venv_win)
-    if venv_nix.exists():
-        return str(venv_nix)
+    venv_standard_nix = ROOT_DIR / "venv" / "bin" / "python"
+    for vpath in (venv_win, venv_standard_win, venv_nix, venv_standard_nix):
+        if vpath.exists():
+            return str(vpath)
     return sys.executable
 
 
@@ -91,6 +95,42 @@ def is_port_open(port: int, host: str = "127.0.0.1") -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
         return s.connect_ex((host, port)) == 0
+
+
+def is_backend_healthy(server_ip: str) -> bool:
+    """Verifies that AEGIS backend is fully started and responding HTTP 200 on /api/health."""
+    for h in (server_ip, "127.0.0.1", "localhost"):
+        try:
+            import urllib.request
+            req = urllib.request.Request(f"http://{h}:8000/api/health", headers={"User-Agent": "AEGIS-Launcher"})
+            with urllib.request.urlopen(req, timeout=1.0) as resp:
+                if resp.status == 200:
+                    return True
+        except Exception:
+            pass
+    return False
+
+
+def ensure_ports_free() -> None:
+    """Checks if ports 8000, 5173, or 5174 are occupied by lingering processes and frees them."""
+    for port in (8000, 5173, 5174):
+        if not is_port_open(port):
+            continue
+
+        print(f"[!] Warning: Port {port} is occupied. Attempting to free port {port}...")
+        if sys.platform == "win32":
+            try:
+                out = subprocess.check_output("netstat -ano -p tcp", shell=True, text=True)
+                for line in out.splitlines():
+                    if f":{port} " in line and "LISTENING" in line:
+                        parts = line.strip().split()
+                        pid = parts[-1]
+                        if pid.isdigit() and int(pid) > 4:
+                            print(f"  [+] Terminating conflicting process (PID {pid}) on port {port}...")
+                            subprocess.run(f"taskkill /F /PID {pid}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(1.0)
+            except Exception as exc:
+                print(f"  [!] Note: Could not auto-terminate process on port {port}: {exc}")
 
 
 def detect_lan_ip() -> str:
@@ -251,6 +291,9 @@ def main() -> None:
     child_env = os.environ.copy()
 
     try:
+        # Pre-flight: ensure ports 8000, 5173, and 5174 are not blocked by rogue processes
+        ensure_ports_free()
+
         # 1. Start FastAPI Backend (0.0.0.0 allows external VMs & LAN devices to connect)
         print("\n[*] Starting Backend API (Port 8000 on 0.0.0.0)...")
         backend_proc = subprocess.Popen(
@@ -260,10 +303,10 @@ def main() -> None:
         )
         processes.append(backend_proc)
 
-        # 2. Start Blue Team SOC Dashboard
+        # 2. Start Blue Team SOC Dashboard (clearScreen=false keeps terminal logs visible)
         print("[*] Starting Blue Team SOC Dashboard (Port 5173 on 0.0.0.0)...")
         dashboard_proc = subprocess.Popen(
-            [npm_cmd, "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"],
+            [npm_cmd, "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173", "--clearScreen", "false"],
             cwd=str(ROOT_DIR / "dashboard"),
             env=child_env,
         )
@@ -272,15 +315,18 @@ def main() -> None:
         # 3. Start Red Team C2 Dashboard
         print("[*] Starting Red Team Adversary C2 Dashboard (Port 5174 on 0.0.0.0)...")
         attack_proc = subprocess.Popen(
-            [npm_cmd, "run", "dev", "--", "--host", "0.0.0.0", "--port", "5174"],
+            [npm_cmd, "run", "dev", "--", "--host", "0.0.0.0", "--port", "5174", "--clearScreen", "false"],
             cwd=str(ROOT_DIR / "attack_dashboard"),
             env=child_env,
         )
         processes.append(attack_proc)
 
-        print("\n[+] Waiting for services to initialize...")
-        for _ in range(30):
-            if is_port_open(8000) and is_port_open(5173) and is_port_open(5174):
+        print("\n[+] Waiting for services to initialize (NeonDB + API + Dashboards)...")
+        for _ in range(40):
+            backend_ok = is_backend_healthy(server_ip)
+            dash_ok = is_port_open(5173)
+            attack_ok = is_port_open(5174)
+            if backend_ok and dash_ok and attack_ok:
                 break
             time.sleep(0.5)
 
@@ -295,7 +341,8 @@ def main() -> None:
         print("\n  Press Ctrl+C at any time to stop all services gracefully.\n")
 
         # Open in default browser locally
-        webbrowser.open("http://127.0.0.1:5173")
+        target_browser_url = f"http://{server_ip}:5173" if server_ip and not server_ip.startswith("127.") else "http://127.0.0.1:5173"
+        webbrowser.open(target_browser_url)
 
         # Keep alive
         while True:

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, Component } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -142,6 +142,55 @@ function getThreatLabel(score) {
   return "SAFE";
 }
 
+function safeToISOString(ts) {
+  if (!ts) return new Date().toISOString();
+  try {
+    if (typeof ts === "string") {
+      const d = new Date(ts);
+      if (!isNaN(d.getTime())) return d.toISOString();
+      const num = Number(ts);
+      if (!isNaN(num)) ts = num;
+      else return new Date().toISOString();
+    }
+    if (typeof ts === "number") {
+      let ms = ts;
+      if (ts > 1e14) ms = Math.floor(ts / 1000000);
+      else if (ts > 1e11) ms = Math.floor(ts / 1000);
+      else if (ts > 1e8) ms = ts * 1000;
+      const d = new Date(ms);
+      if (!isNaN(d.getTime())) return d.toISOString();
+    }
+  } catch (e) {}
+  return new Date().toISOString();
+}
+
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error("[AEGIS ErrorBoundary]", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 24, textAlign: "center", color: "#f87171", background: "rgba(239, 68, 68, 0.08)", borderRadius: 10, border: "1px solid rgba(239, 68, 68, 0.25)", margin: 16 }}>
+          <h4 style={{ marginBottom: 6, color: "#f87171" }}>Unable to display view component</h4>
+          <p style={{ fontSize: 12, color: "#94a3b8", marginBottom: 12 }}>{this.state.error?.message || "Render error"}</p>
+          <button className="btn-small-pulse" onClick={() => this.setState({ hasError: false, error: null })}>
+            Reload View
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* ═══════════════════════════════════════════════
    Custom Chart Tooltip
    ═══════════════════════════════════════════════ */
@@ -194,8 +243,10 @@ export default function App() {
   const [totalTelemetryCount, setTotalTelemetryCount] = useState(0);
   const [serverUptime, setServerUptime] = useState(0);
   const [hostOS, setHostOS] = useState("Windows");
+  const [serverHostname, setServerHostname] = useState("Izuku");
+  const [serverIp, setServerIp] = useState("127.0.0.1");
   const [clock, setClock] = useState(new Date());
-  const [agents, setAgents] = useState({}); // agent_id -> { agentId, status, cpu, alarmed, lastSeen }
+  const [agents, setAgents] = useState({}); // agent_id -> { agentId, status, cpu, alarmed, lastSeen, ip, os, role }
 
   // New Phase D States (NeonDB, Trust Feedback, Maintenance, Silence Alarms, Audit)
   const [verdicts, setVerdicts] = useState([]);
@@ -309,12 +360,15 @@ export default function App() {
     if (activeTab === "peer_voting") {
       fetchTelemetry();
       fetchVerdicts();
+      if (typeof fetchAgents === "function") fetchAgents();
+      fetchAgentTrust();
     }
     if (activeTab === "verdicts") fetchVerdicts();
     if (activeTab === "maintenance") fetchMaintenance();
     if (activeTab === "agents") {
       fetchAgentTrust();
       fetchSilenceAlarms();
+      if (typeof fetchAgents === "function") fetchAgents();
     }
     if (activeTab === "audit") fetchAudit();
   }, [activeTab, fetchTelemetry, fetchVerdicts, fetchMaintenance, fetchAgentTrust, fetchSilenceAlarms, fetchAudit]);
@@ -417,6 +471,8 @@ export default function App() {
         const data = await res.json();
         if (data.uptime !== undefined) setServerUptime(Math.floor(data.uptime));
         if (data.platform) setHostOS(data.platform);
+        if (data.hostname) setServerHostname(data.hostname);
+        if (data.server_ip) setServerIp(data.server_ip);
       } catch (e) {
         // Backend offline
       }
@@ -517,6 +573,19 @@ export default function App() {
                 reason: event.reason,
               },
             }));
+            setAlerts((prev) => [
+              {
+                id: `shutdown-${event.agent_id}-${Date.now()}`,
+                severity: "warning",
+                process: event.agent_id,
+                agent_id: event.agent_id,
+                pid: 0,
+                message: `${event.agent_id} completed GRACEFUL SHUTDOWN (${event.reason || "Planned offline"})`,
+                time: new Date().toLocaleTimeString("en-GB", { hour12: false }),
+                tag: "GRACEFUL_SHUTDOWN",
+              },
+              ...prev,
+            ].slice(0, 10));
             showToast(`Agent ${event.agent_id} completed graceful shutdown (${event.reason || "Planned offline"})`);
             return;
           }
@@ -622,7 +691,15 @@ export default function App() {
     return () => {
       stopped = true;
       clearTimeout(reconnectTimer);
-      if (ws) ws.close();
+      if (ws) {
+        if (ws.readyState === WebSocket.OPEN) {
+          try { ws.close(); } catch (e) {}
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          ws.onopen = () => {
+            try { ws.close(); } catch (e) {}
+          };
+        }
+      }
     };
   }, []);
 
@@ -646,27 +723,64 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  /* Fetch initial agent heartbeat snapshot */
-  useEffect(() => {
-    fetch(`${API_BASE}/api/agents`)
-      .then((res) => res.json())
-      .then((data) => {
-        const map = {};
-        (data.agents || []).forEach((a) => {
-          map[a.agent_id] = {
-            agentId: a.agent_id,
-            status: a.alarm_raised ? "silent" : a.status,
-            cpu: a.cpu,
-            ip: a.ip || "127.0.0.1",
-            os: a.os || "Unknown",
-            alarmed: a.alarm_raised,
-            lastSeen: a.last_seen,
-          };
-        });
-        setAgents(map);
-      })
-      .catch(() => {});
+  /* Fetch and poll agent heartbeat snapshot */
+  const fetchAgents = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/agents`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const map = {};
+      (data.agents || []).forEach((a) => {
+        const isAlarmed = !!a.alarm_raised || a.status === "silent";
+        const isGraceful = a.status === "OFFLINE_GRACEFUL";
+        map[a.agent_id] = {
+          agentId: a.agent_id,
+          status: isGraceful ? "OFFLINE_GRACEFUL" : (isAlarmed ? "silent" : a.status),
+          cpu: isGraceful || isAlarmed ? 0.0 : a.cpu,
+          ip: a.ip || "127.0.0.1",
+          os: a.os || "Unknown",
+          role: a.role || (a.agent_id === serverHostname ? "Command Node (Server)" : "Endpoint Agent"),
+          alarmed: isAlarmed,
+          lastSeen: a.last_seen,
+          reason: a.reason,
+        };
+      });
+      setAgents(map);
+
+      // Ensure active silent alarms are immediately reflected in Alert Feed if not already present
+      (data.agents || []).forEach((a) => {
+        if ((a.alarm_raised || a.status === "silent") && a.agent_id !== serverHostname) {
+          setAlerts((prev) => {
+            const hasRecentAlarm = prev.some(
+              (al) => al.agent_id === a.agent_id && al.tag === "SILENT_ALARM"
+            );
+            if (!hasRecentAlarm) {
+              return [
+                {
+                  id: `alarm-${a.agent_id}-${Date.now()}`,
+                  severity: "critical",
+                  process: a.agent_id,
+                  agent_id: a.agent_id,
+                  pid: 0,
+                  message: `${a.agent_id} is SILENT — no heartbeat received`,
+                  time: new Date().toLocaleTimeString("en-GB", { hour12: false }),
+                  tag: "SILENT_ALARM",
+                },
+                ...prev,
+              ].slice(0, 10);
+            }
+            return prev;
+          });
+        }
+      });
+    } catch (e) {}
   }, []);
+
+  useEffect(() => {
+    fetchAgents();
+    const id = setInterval(fetchAgents, 3500);
+    return () => clearInterval(id);
+  }, [fetchAgents]);
 
   /* Formatting calculations */
   const hrs = Math.floor(serverUptime / 3600);
@@ -1634,9 +1748,19 @@ export default function App() {
                               )}
                             </div>
                             <div className="health-detail">
-                              {a.alarmed
-                                ? "SILENT — no heartbeat received"
-                                : `${(a.status || "healthy").toUpperCase()} · CPU ${typeof a.cpu === "number" ? a.cpu.toFixed(1) : a.cpu}% · Heartbeat verified`}
+                              {a.alarmed || a.status === "silent" ? (
+                                <span style={{ color: "#f87171", fontWeight: 600 }}>
+                                  SILENT / UNRESPONSIVE — Heartbeat lost (Silence Alarm Active)
+                                </span>
+                              ) : a.status === "OFFLINE_GRACEFUL" ? (
+                                <span style={{ color: "#94a3b8", fontWeight: 500 }}>
+                                  OFFLINE (GRACEFUL) — Planned shutdown recorded ({a.reason || "OS service stopped"})
+                                </span>
+                              ) : (
+                                <span style={{ color: "#34d399" }}>
+                                  {`${(a.status || "healthy").toUpperCase()} · CPU ${typeof a.cpu === "number" ? a.cpu.toFixed(1) : a.cpu}% · Heartbeat verified`}
+                                </span>
+                              )}
                             </div>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1645,8 +1769,21 @@ export default function App() {
                             </span>
                             <div
                               className={`health-dot ${
-                                a.alarmed ? "disconnected" : a.status === "degraded" ? "connecting" : "active"
+                                a.alarmed || a.status === "silent"
+                                  ? "disconnected"
+                                  : a.status === "OFFLINE_GRACEFUL"
+                                  ? "offline-graceful"
+                                  : a.status === "degraded"
+                                  ? "connecting"
+                                  : "active"
                               }`}
+                              title={
+                                a.alarmed || a.status === "silent"
+                                  ? "Silent Alarm: Agent lost heartbeat"
+                                  : a.status === "OFFLINE_GRACEFUL"
+                                  ? "Offline: Graceful shutdown recorded"
+                                  : "Healthy: Live heartbeat receiving"
+                              }
                             />
                           </div>
                         </div>
@@ -1921,11 +2058,19 @@ export default function App() {
 
         {/* ═══ TAB: LIVE PEER VOTING & TELEMETRY TABLE ═══ */}
         {activeTab === "peer_voting" && (
-          <section className="content-grid" style={{ display: "block" }}>
+          <ErrorBoundary>
+            <section className="content-grid" style={{ display: "block" }}>
             <LivePeerVotingVisualization
               liveVerdicts={verdicts}
               selectedTelemetry={selectedTelemetryForVoting}
               onBack={selectedTelemetryForVoting ? () => setSelectedTelemetryForVoting(null) : null}
+              agents={agents}
+              agentTrustMap={agentTrustMap}
+              telemetryRecords={telemetryRecords}
+              apiBase={API_BASE}
+              serverHostname={serverHostname}
+              serverIp={serverIp}
+              serverOS={hostOS}
             />
 
             <div className="panel full-width" style={{ marginTop: 20 }}>
@@ -2071,7 +2216,7 @@ export default function App() {
                       threat_score: score,
                       peer_voting_verdict: verdictText,
                       voting_status: votingStatus,
-                      timestamp: item.received_at || payload.timestamp || new Date().toISOString(),
+                      timestamp: safeToISOString(item.received_at || payload.timestamp),
                       target: payload.process || payload.file_path || payload.target_file || tName,
                       verdict_obj: matchedVerdict || null,
                     });
@@ -2106,7 +2251,7 @@ export default function App() {
                         threat_score: proc.threat_score,
                         peer_voting_verdict: verdictText,
                         voting_status: votingStatus,
-                        timestamp: proc.timestamp ? new Date(proc.timestamp * 1000).toISOString() : new Date().toISOString(),
+                        timestamp: safeToISOString(proc.timestamp),
                         target: proc.process,
                         verdict_obj: matchedVerdict || null,
                       });
@@ -2129,7 +2274,7 @@ export default function App() {
                         threat_score: v.final_weighted_score ?? v.raw_threat_score ?? 0.0,
                         peer_voting_verdict: v.severity || (v.consensus_reached ? "CONSENSUS_REACHED" : "EVALUATED"),
                         voting_status: v.consensus_reached ? "QUORUM_REACHED" : "PARTIAL_QUORUM",
-                        timestamp: v.timestamp ? (typeof v.timestamp === "number" ? new Date(v.timestamp * 1000).toISOString() : v.timestamp) : new Date().toISOString(),
+                        timestamp: safeToISOString(v.timestamp),
                         target: v.event_type,
                         verdict_obj: v,
                       });
@@ -2309,7 +2454,8 @@ export default function App() {
               </div>
             </div>
           </section>
-        )}
+        </ErrorBoundary>
+      )}
 
         {/* ═══ TAB: MAINTENANCE WINDOWS ═══ */}
         {activeTab === "maintenance" && (

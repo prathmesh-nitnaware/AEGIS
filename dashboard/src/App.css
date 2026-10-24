@@ -886,6 +886,12 @@ tr.highlight-row {
 
 .health-dot.disconnected {
   background: #f87171;
+  box-shadow: 0 0 8px #f87171;
+}
+
+.health-dot.offline-graceful {
+  background: #94a3b8;
+  box-shadow: 0 0 4px rgba(148, 163, 184, 0.4);
 }
 
 /* ═══════════════════════════════════════════════
