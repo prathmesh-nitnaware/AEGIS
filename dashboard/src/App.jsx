@@ -61,6 +61,7 @@ import ThreatIntelTab from "./ThreatIntelTab";
 import RbacAuthTab from "./RbacAuthTab";
 import LivePeerVotingVisualization from "./LivePeerVotingVisualization";
 import AgentMachineCockpit from "./AgentMachineCockpit";
+import ActionLogTab from "./ActionLogTab";
 
 
 
@@ -259,6 +260,7 @@ export default function App() {
   const [silenceAlarms, setSilenceAlarms] = useState([]);
   const [agentTrustMap, setAgentTrustMap] = useState({});
   const [auditLogs, setAuditLogs] = useState([]);
+  const [actionLogs, setActionLogs] = useState([]);
   const [feedbackToast, setFeedbackToast] = useState(null);
 
   // System and Machine IP Telemetry Filtering States
@@ -357,12 +359,26 @@ export default function App() {
     }
   }, []);
 
+  const fetchActionLogs = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/actions?limit=50`);
+      const data = await res.json();
+      if (data && data.actions) setActionLogs(data.actions);
+    } catch (e) {
+      // silent
+    }
+  }, []);
+
   // Poll active silence alarms and health
   useEffect(() => {
     fetchSilenceAlarms();
-    const id = setInterval(fetchSilenceAlarms, 4000);
+    fetchActionLogs();
+    const id = setInterval(() => {
+      fetchSilenceAlarms();
+      fetchActionLogs();
+    }, 5000);
     return () => clearInterval(id);
-  }, [fetchSilenceAlarms]);
+  }, [fetchSilenceAlarms, fetchActionLogs]);
 
   // Tab switch fetcher
   useEffect(() => {
@@ -380,7 +396,9 @@ export default function App() {
       if (typeof fetchAgents === "function") fetchAgents();
     }
     if (activeTab === "audit") fetchAudit();
-  }, [activeTab, fetchTelemetry, fetchVerdicts, fetchMaintenance, fetchAgentTrust, fetchSilenceAlarms, fetchAudit]);
+    if (activeTab === "action_log") fetchActionLogs();
+  }, [activeTab, fetchTelemetry, fetchVerdicts, fetchMaintenance, fetchAgentTrust, fetchSilenceAlarms, fetchAudit, fetchActionLogs]);
+
 
   const getAdminToken = useCallback(async () => {
     let token = localStorage.getItem("aegis_admin_token");
@@ -1007,6 +1025,15 @@ export default function App() {
           >
             <FileText size={16} />
             Mitigation Audit Log
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === "action_log" ? "active" : ""}`}
+            onClick={() => selectTab("action_log")}
+          >
+            <Zap size={16} />
+            Action Dispatch Log
+            {actionLogs.length > 0 && <span className="nav-badge" style={{ background: "rgba(239,68,68,0.2)", color: "#ef4444" }}>{actionLogs.length}</span>}
           </button>
 
           <div className="nav-section" style={{ marginTop: 14 }}>TELEMETRY</div>
@@ -2844,6 +2871,13 @@ export default function App() {
           </section>
         )}
           </>
+        )}
+
+        {/* ═══ TAB: ACTION DISPATCH LOG ═══ */}
+        {activeTab === "action_log" && (
+          <section className="panel activity-panel">
+            <ActionLogTab />
+          </section>
         )}
 
 
