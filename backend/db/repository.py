@@ -213,6 +213,7 @@ async def get_verdicts_history(
     offset: int = 0,
     severity: Optional[str] = None,
     agent_id: Optional[str] = None,
+    since_timestamp: Optional[float] = None,
 ) -> List[ConsensusVerdict]:
     """Paginated history of verdicts with optional filters."""
     stmt = (
@@ -225,6 +226,8 @@ async def get_verdicts_history(
         stmt = stmt.where(ConsensusVerdict.severity == severity)
     if agent_id:
         stmt = stmt.where(ConsensusVerdict.origin_agent_id == agent_id)
+    if since_timestamp is not None:
+        stmt = stmt.where(ConsensusVerdict.verdict_timestamp >= since_timestamp)
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
@@ -410,6 +413,20 @@ async def load_active_maintenance_windows(
         select(MaintenanceWindowRecord)
         .where(MaintenanceWindowRecord.is_active == True)  # noqa: E712
         .where(MaintenanceWindowRecord.end_time > now)
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def load_all_maintenance_windows(
+    session: AsyncSession,
+    limit: int = 100,
+) -> List[MaintenanceWindowRecord]:
+    """Load all maintenance windows (active, expired, and cancelled) ordered by start_time desc."""
+    stmt = (
+        select(MaintenanceWindowRecord)
+        .order_by(MaintenanceWindowRecord.start_time.desc())
+        .limit(limit)
     )
     result = await session.execute(stmt)
     return list(result.scalars().all())

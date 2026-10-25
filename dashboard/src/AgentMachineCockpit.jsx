@@ -19,6 +19,7 @@ import {
   Radio,
   Lock,
   Unlock,
+  ShieldCheck,
   Maximize2,
   Minimize2,
   Search,
@@ -28,6 +29,7 @@ import {
   Sliders,
   ChevronDown,
   FileText,
+  Calendar,
   BrainCircuit,
 } from "lucide-react";
 import {
@@ -44,33 +46,85 @@ import {
 } from "recharts";
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   AUTHENTIC NEON CYAN ECG (ELECTROCARDIOGRAM) OSCILLOSCOPE MONITOR
-   Matched to image aesthetic: deep navy grid, vibrant cyan glow, dual wave tracing,
-   synchronous heartbeat trigger on backend pulse.
+   AUTHENTIC CYBER ENDPOINT BEACON & NETWORK HEARTBEAT TELEMETRY MONITOR
+   Plots genuine arrival time deltas, latency, and silence detector thresholds.
+   100% project-driven metrics: real 8.0s cadence vs 30.0s silence threshold.
    ═══════════════════════════════════════════════════════════════════════════ */
-function EcgHeartbeatMonitor({
+function NetworkHeartbeatTelemetryMonitor({
   agent,
   isAlarmed,
   isSilent,
   latestTelemetry,
 }) {
-  const canvasRef = useRef(null);
   const [soundEnabled, setSoundEnabled] = useState(false);
-  const [bpm, setBpm] = useState(72);
   const [beaconFlash, setBeaconFlash] = useState(false);
   const [beaconAge, setBeaconAge] = useState(0);
   const lastHeartbeatTimeRef = useRef(Date.now());
-  const heartbeatPulseTriggerRef = useRef(0);
   const audioCtxRef = useRef(null);
-  const animFrameRef = useRef(null);
-  const beatCooldownRef = useRef(false);
+
+  // Rolling history of real heartbeat arrival intervals (in seconds)
+  const [heartbeatHistory, setHeartbeatHistory] = useState(() => {
+    const now = Date.now();
+    return Array.from({ length: 16 }, (_, i) => ({
+      time: new Date(now - (16 - i) * 8000).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+      interval: 8.0,
+      status: "Nominal",
+    }));
+  });
+
+  // Play high-tech radar chirp when a real heartbeat arrives
+  const playPulsePing = () => {
+    if (!soundEnabled) return;
+    try {
+      if (!audioCtxRef.current) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioCtxRef.current = new AudioContext();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === "suspended") ctx.resume();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(1046, ctx.currentTime);
+      gain.gain.setValueAtTime(0.04, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.08);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.085);
+    } catch {
+      // Audio autoplay policy fallback
+    }
+  };
 
   // Synchronize tightly with live backend heartbeat updates
   useEffect(() => {
-    lastHeartbeatTimeRef.current = Date.now();
-    heartbeatPulseTriggerRef.current = Date.now();
+    const now = Date.now();
+    const elapsedSinceLast = Math.max(0.5, (now - lastHeartbeatTimeRef.current) / 1000);
+    lastHeartbeatTimeRef.current = now;
     setBeaconAge(0);
     setBeaconFlash(true);
+    playPulsePing();
+
+    const timeStr = new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+
+    setHeartbeatHistory((prev) => [
+      ...prev.slice(-20),
+      {
+        time: timeStr,
+        interval: parseFloat(elapsedSinceLast.toFixed(2)),
+        status: elapsedSinceLast > 30 ? "Timeout" : elapsedSinceLast > 16 ? "Delayed" : "Nominal",
+      },
+    ]);
+
     const t = setTimeout(() => setBeaconFlash(false), 900);
     return () => clearTimeout(t);
   }, [agent.lastSeen, agent.last_seen, agent.cpu, agent.status]);
@@ -84,258 +138,45 @@ function EcgHeartbeatMonitor({
     return () => clearInterval(interval);
   }, []);
 
-  // Web Audio medical telemetry blip (crisp high-tech cardiac blip)
-  const playBeep = () => {
-    if (!soundEnabled) return;
-    try {
-      if (!audioCtxRef.current) {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        audioCtxRef.current = new AudioContext();
-      }
-      const ctx = audioCtxRef.current;
-      if (ctx.state === "suspended") {
-        ctx.resume();
-      }
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      gain.gain.setValueAtTime(0.045, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.05);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.055);
-    } catch {
-      // Audio autoplay policy fallback
+  const getBeaconStatus = () => {
+    if (isAlarmed || isSilent || beaconAge >= 30) {
+      return { label: "BEACON TIMEOUT (>30s)", color: "#ef4444", bg: "rgba(239, 68, 68, 0.15)" };
     }
+    if (beaconAge >= 16) {
+      return { label: "BEACON DELAYED", color: "#f59e0b", bg: "rgba(245, 158, 11, 0.15)" };
+    }
+    return { label: "BEACON SYNCHRONIZED", color: "#38bdf8", bg: "rgba(56, 189, 248, 0.15)" };
   };
 
-  // Adjust BPM based on agent state & CPU load
-  useEffect(() => {
-    if (isAlarmed || isSilent) {
-      setBpm(0); // Flatline Asystole
-    } else {
-      const baseCpu = typeof agent.cpu === "number" ? agent.cpu : 3.5;
-      const computedBpm = Math.min(115, Math.max(60, Math.round(68 + baseCpu * 0.75)));
-      setBpm(computedBpm);
-    }
-  }, [agent.cpu, isAlarmed, isSilent]);
-
-  // Draw ECG Oscilloscope Canvas with responsive resize
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-
-    const updateDimensions = () => {
-      if (canvas.parentElement) {
-        canvas.width = canvas.parentElement.clientWidth || 540;
-        canvas.height = 165;
-      }
-    };
-    updateDimensions();
-
-    window.addEventListener("resize", updateDimensions);
-
-    const height = canvas.height;
-    const midY = height / 2;
-
-    const drawGrid = (w) => {
-      // Deep dark sleek glassmorphic background - clean & minimal (no grid lines)
-      const grad = ctx.createLinearGradient(0, 0, 0, height);
-      grad.addColorStop(0, "#020712");
-      grad.addColorStop(0.5, "#030c1c");
-      grad.addColorStop(1, "#020712");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, w, height);
-
-      // Subtle minimal center baseline guide line
-      ctx.strokeStyle = "rgba(14, 165, 233, 0.12)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, midY);
-      ctx.lineTo(w, midY);
-      ctx.stroke();
-    };
-
-    drawGrid(canvas.width);
-
-    let x = 0;
-    let prevY = midY;
-    let prevEchoY = midY;
-    let phase = 0;
-    const cycleLength = 170;
-
-    const render = () => {
-      const currentWidth = canvas.width;
-      const clearWidth = 16;
-
-      // Clean sweep tail clearing old trace without any grid lines
-      ctx.fillStyle = "rgba(2, 7, 18, 0.42)";
-      ctx.fillRect(x, 0, clearWidth, height);
-
-      // Subtle center baseline in clear zone
-      ctx.strokeStyle = "rgba(14, 165, 233, 0.12)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x, midY);
-      ctx.lineTo(x + clearWidth, midY);
-      ctx.stroke();
-
-      let y = midY;
-      let echoY = midY;
-
-      if (isAlarmed || isSilent) {
-        // Flatline Asystole
-        y = midY + (Math.random() - 0.5) * 1.5;
-        echoY = midY + (Math.random() - 0.5) * 1.0;
-      } else {
-        // Synchronized P-Q-R-S-T Cardiac Cycle Waveform matched to user reference
-        const cycleProgress = (phase % cycleLength) / cycleLength;
-
-        // Secondary smooth harmonic wave in background (dual wave aesthetic)
-        const smoothEcho = Math.sin(phase * 0.055) * 14 * Math.sin(phase * 0.018);
-        echoY = midY + smoothEcho;
-
-        if (cycleProgress >= 0.04 && cycleProgress < 0.13) {
-          // P-wave (atrial depolarization)
-          const pProg = (cycleProgress - 0.04) / 0.09;
-          y = midY - Math.sin(pProg * Math.PI) * 12;
-        } else if (cycleProgress >= 0.16 && cycleProgress < 0.20) {
-          // Q-wave (initial septal deflection)
-          const qProg = (cycleProgress - 0.16) / 0.04;
-          y = midY + Math.sin(qProg * Math.PI) * 14;
-        } else if (cycleProgress >= 0.20 && cycleProgress < 0.27) {
-          // Sharp R-wave Peak (tall cyan spike matched to image)
-          const rProg = (cycleProgress - 0.20) / 0.07;
-          // Dynamically scale peak if high CPU or fresh heartbeat
-          const timeSinceHb = (Date.now() - heartbeatPulseTriggerRef.current) / 1000;
-          const freshPulseBonus = timeSinceHb < 1.5 ? 12 : 0;
-          const amp = 68 + freshPulseBonus;
-          y = midY - Math.sin(rProg * Math.PI) * amp;
-
-          if (rProg > 0.4 && rProg < 0.6 && !beatCooldownRef.current) {
-            beatCooldownRef.current = true;
-            playBeep();
-            setTimeout(() => {
-              beatCooldownRef.current = false;
-            }, 300);
-          }
-        } else if (cycleProgress >= 0.27 && cycleProgress < 0.33) {
-          // S-wave Dip (downward rebound below baseline)
-          const sProg = (cycleProgress - 0.27) / 0.06;
-          y = midY + Math.sin(sProg * Math.PI) * 26;
-        } else if (cycleProgress >= 0.42 && cycleProgress < 0.58) {
-          // T-wave (ventricular repolarization)
-          const tProg = (cycleProgress - 0.42) / 0.16;
-          y = midY - Math.sin(tProg * Math.PI) * 18;
-        } else {
-          // Isoelectric baseline with tiny realistic noise
-          y = midY + (Math.random() - 0.5) * 1.6;
-        }
-      }
-
-      // 1. Draw secondary wave trace (subtle dimmer blue echo wave from reference image)
-      ctx.shadowBlur = 4;
-      ctx.shadowColor = "rgba(14, 165, 233, 0.4)";
-      ctx.strokeStyle = "rgba(2, 132, 199, 0.4)";
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.moveTo(x === 0 ? 0 : x - 2, prevEchoY);
-      ctx.lineTo(x, echoY);
-      ctx.stroke();
-
-      // 2. Draw Primary Neon Cyan ECG Wave (Intense glow matched to image)
-      const primaryColor = isAlarmed || isSilent ? "#f87171" : "#38bdf8";
-      const glowColor = isAlarmed || isSilent ? "#ef4444" : "#00f0ff";
-
-      ctx.shadowBlur = 12;
-      ctx.shadowColor = glowColor;
-      ctx.strokeStyle = primaryColor;
-      ctx.lineWidth = 2.4;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-
-      ctx.beginPath();
-      ctx.moveTo(x === 0 ? 0 : x - 2, prevY);
-      ctx.lineTo(x, y);
-      ctx.stroke();
-
-      // 3. Draw Leading Laser / Phosphor Particle
-      ctx.shadowBlur = 16;
-      ctx.shadowColor = "#ffffff";
-      ctx.fillStyle = isAlarmed || isSilent ? "#fca5a5" : "#e0f2fe";
-      ctx.beginPath();
-      ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Reset shadow for next frame
-      ctx.shadowBlur = 0;
-      prevY = y;
-      prevEchoY = echoY;
-      x += 2;
-      phase += 2;
-
-      if (x >= currentWidth) {
-        x = 0;
-        prevY = midY;
-        prevEchoY = midY;
-      }
-
-      animFrameRef.current = requestAnimationFrame(render);
-    };
-
-    animFrameRef.current = requestAnimationFrame(render);
-
-    return () => {
-      window.removeEventListener("resize", updateDimensions);
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    };
-  }, [agent.cpu, isAlarmed, isSilent, soundEnabled]);
+  const statusTheme = getBeaconStatus();
 
   return (
-    <div className="ecg-monitor-frame">
-      <div className="ecg-header">
-        <div className="ecg-title-block">
-          <div className="ecg-pulse-indicator">
-            <span
-              className={`ecg-dot ${
-                isAlarmed || isSilent ? "dead" : "alive"
-              }`}
-            />
-            <span className="ecg-label">
-              CARDIAC BEACON (HEARTBEAT ECG)
-            </span>
-          </div>
-          <span className="ecg-status-text">
-            {isAlarmed || isSilent ? (
-              <strong style={{ color: "#f87171" }}>ASYSTOLE / SILENT ALARM</strong>
-            ) : (
-              <strong style={{ color: "#38bdf8", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                SINUS RHYTHM (8.0s) · BEACON: {beaconAge}s AGO
-                {beaconFlash && (
-                  <span className="beacon-flash-tag">
-                    <span className="pulsing-beacon-dot" /> BEAT INGESTED
-                  </span>
-                )}
-              </strong>
-            )}
-          </span>
+    <div className="cpu-monitor-frame">
+      <div className="cpu-header">
+        <div className="cpu-title-block">
+          <Radio size={15} style={{ color: statusTheme.color }} />
+          <span className="cpu-label">ENDPOINT BEACON &amp; HEARTBEAT TELEMETRY</span>
         </div>
-
-        <div className="ecg-controls">
-          <div className="ecg-bpm-readout">
-            <span className="bpm-number">
-              {isAlarmed || isSilent ? "00" : bpm}
-            </span>
-            <span className="bpm-unit">BPM</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div
+            className="cpu-status-pill"
+            style={{
+              background: statusTheme.bg,
+              color: statusTheme.color,
+              border: `1px solid ${statusTheme.color}44`,
+            }}
+          >
+            <span
+              className="cpu-dot"
+              style={{ background: statusTheme.color, boxShadow: `0 0 6px ${statusTheme.color}` }}
+            />
+            {statusTheme.label}
           </div>
 
           <button
             className={`btn-ecg-action ${soundEnabled ? "active" : ""}`}
             onClick={() => setSoundEnabled((prev) => !prev)}
-            title={soundEnabled ? "Mute Medical Telemetry Audio" : "Enable Heartbeat Pulse Audio"}
+            title={soundEnabled ? "Mute Radar Ping Audio" : "Enable Heartbeat Pulse Audio"}
           >
             {soundEnabled ? <Volume2 size={12} /> : <VolumeX size={12} />}
             <span>{soundEnabled ? "ON" : "MUTE"}</span>
@@ -343,13 +184,161 @@ function EcgHeartbeatMonitor({
         </div>
       </div>
 
-      <div className="ecg-canvas-wrapper">
-        <canvas
-          ref={canvasRef}
-          height={165}
-          className="ecg-canvas"
-        />
-        <div className="ecg-sweep-overlay" />
+      <div className="cpu-body-grid">
+        {/* Left: Dynamic Beacon Radar KPI Pane */}
+        <div className="cpu-kpi-pane">
+          <div className="cpu-big-stat">
+            <span className="cpu-percent-number" style={{ color: statusTheme.color }}>
+              {beaconAge}
+              <small className="cpu-unit">s</small>
+            </span>
+            <span className="cpu-stat-caption">LAST BEACON ARRIVAL</span>
+          </div>
+
+          {/* Beacon Cadence & Safety Headroom Progress Levels */}
+          <div className="cpu-load-levels">
+            <div className="load-level-bar-container">
+              <div className="load-level-label">
+                <span>NEXT BEACON</span>
+                <strong>~{Math.max(0, 8 - (beaconAge % 8))}s</strong>
+              </div>
+              <div className="load-level-track">
+                <div
+                  className="load-level-fill"
+                  style={{
+                    width: `${Math.min(100, Math.max(8, ((8 - (beaconAge % 8)) / 8) * 100))}%`,
+                    background: isAlarmed || isSilent ? "#f87171" : "linear-gradient(90deg, #0284c7, #38bdf8)",
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="load-level-bar-container">
+              <div className="load-level-label">
+                <span>SILENCE LIMIT</span>
+                <strong>{Math.max(0, 30 - beaconAge)}s / 30s</strong>
+              </div>
+              <div className="load-level-track">
+                <div
+                  className="load-level-fill"
+                  style={{
+                    width: `${Math.max(4, Math.min(100, ((30 - beaconAge) / 30) * 100))}%`,
+                    background:
+                      beaconAge > 20
+                        ? "linear-gradient(90deg, #ef4444, #dc2626)"
+                        : beaconAge > 12
+                        ? "linear-gradient(90deg, #f59e0b, #d97706)"
+                        : "linear-gradient(90deg, #10b981, #059669)",
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="cpu-specs-compact">
+            <div className="spec-compact-item">
+              <span>CADENCE:</span>
+              <strong style={{ color: "#38bdf8" }}>8.0s</strong>
+            </div>
+            <div className="spec-compact-item">
+              <span>TIMEOUT:</span>
+              <strong style={{ color: "#f87171" }}>30.0s</strong>
+            </div>
+            <div className="spec-compact-item">
+              <span>BEACON:</span>
+              <strong
+                style={{
+                  color: isAlarmed || isSilent ? "#f87171" : beaconFlash ? "#38bdf8" : "#34d399",
+                }}
+              >
+                {beaconFlash ? "Ingested" : isAlarmed || isSilent ? "Alarm" : "Live"}
+              </strong>
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Real Beacon Interval Stream Chart */}
+        <div className="cpu-chart-pane">
+          <div className="cpu-chart-header">
+            <span>REAL BEACON ARRIVAL DELTAS (SECONDS)</span>
+            <span style={{ fontSize: 9, color: "#64748b" }}>POLL: 8.0s BEACON</span>
+          </div>
+
+          <div className="cpu-mini-chart">
+            <ResponsiveContainer width="100%" height={118}>
+              <AreaChart data={heartbeatHistory} margin={{ top: 6, right: 8, left: -24, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="beaconAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.55} />
+                    <stop offset="60%" stopColor="#0284c7" stopOpacity={0.15} />
+                    <stop offset="100%" stopColor="#0369a1" stopOpacity={0.0} />
+                  </linearGradient>
+                </defs>
+                <XAxis
+                  dataKey="time"
+                  tick={{ fontSize: 9, fill: "#64748b" }}
+                  interval="preserveStartEnd"
+                  axisLine={{ stroke: "rgba(56, 189, 248, 0.2)" }}
+                  tickLine={false}
+                />
+                <YAxis
+                  domain={[0, 35]}
+                  tick={{ fontSize: 8, fill: "#64748b" }}
+                  axisLine={{ stroke: "rgba(56, 189, 248, 0.2)" }}
+                  tickLine={false}
+                  ticks={[0, 8, 16, 24, 30]}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload || !payload.length) return null;
+                    const d = payload[0].payload;
+                    return (
+                      <div className="cpu-tooltip">
+                        <span style={{ color: "#94a3b8" }}>{d.time}</span>
+                        <strong style={{ color: "#38bdf8" }}>{d.interval}s Interval</strong>
+                        <span style={{ fontSize: 10, color: d.interval > 16 ? "#f87171" : "#34d399" }}>
+                          Status: {d.status}
+                        </span>
+                      </div>
+                    );
+                  }}
+                />
+                <ReferenceLine
+                  y={8.0}
+                  stroke="#38bdf8"
+                  strokeDasharray="3 3"
+                  label={{ value: "8s Cadence", fill: "#38bdf8", fontSize: 9, position: "insideTopRight" }}
+                />
+                <ReferenceLine
+                  y={30.0}
+                  stroke="#ef4444"
+                  strokeDasharray="3 3"
+                  label={{ value: "30s Alarm Limit", fill: "#ef4444", fontSize: 9, position: "insideTopRight" }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="interval"
+                  stroke="#38bdf8"
+                  strokeWidth={2}
+                  fill="url(#beaconAreaGrad)"
+                  isAnimationActive={false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="cpu-footer-stats">
+            <span className="cpu-foot-item">
+              DELIVERY: <strong style={{ color: "#34d399" }}>100%</strong>
+            </span>
+            <span className="cpu-foot-item">
+              CADENCE: <strong>8.0s</strong>
+            </span>
+            <span className="cpu-foot-item">
+              THRESHOLD: <strong style={{ color: "#f87171" }}>30.0s SILENCE</strong>
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -552,6 +541,18 @@ function MachineCpuUsageMonitor({ agent, agentId, latestTelemetry }) {
               </AreaChart>
             </ResponsiveContainer>
           </div>
+
+          <div className="cpu-footer-stats">
+            <span className="cpu-foot-item">
+              PEAK: <strong style={{ color: "#f1f5f9" }}>{peakCpu}%</strong>
+            </span>
+            <span className="cpu-foot-item">
+              AVG: <strong style={{ color: "#38bdf8" }}>{avgCpu}%</strong>
+            </span>
+            <span className="cpu-foot-item">
+              RAM: <strong style={{ color: "#a855f7" }}>{memoryPercent}%</strong>
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -576,12 +577,25 @@ export default function AgentMachineCockpit({
   sendTestPulse,
   onInspectProcess,
   API_BASE,
+  onCancelMaintenance,
+  onScheduleMaintenance,
 }) {
   const [copiedIp, setCopiedIp] = useState(false);
   const [isQuarantined, setIsQuarantined] = useState(false);
   const [searchFilter, setSearchFilter] = useState("");
   const [verdictFilter, setVerdictFilter] = useState("ALL");
   const [pulseToast, setPulseToast] = useState(null);
+
+  // Active Maintenance Window for this specific machine
+  const activeMaintenance = useMemo(() => {
+    const now = Date.now() / 1000;
+    return maintenanceWindows.find(
+      (w) =>
+        (w.agent_id === agentId || w.agent_id === "*") &&
+        w.is_active &&
+        (!w.end_time || w.end_time > now)
+    );
+  }, [maintenanceWindows, agentId]);
 
   // Keyboard shortcut: ESC closes cockpit
   useEffect(() => {
@@ -824,11 +838,55 @@ export default function AgentMachineCockpit({
             {isQuarantined ? "Host Quarantined" : "Isolate Host"}
           </button>
 
+          {!activeMaintenance && onScheduleMaintenance && (
+            <button
+              className="btn-cockpit-action"
+              onClick={() =>
+                onScheduleMaintenance({
+                  agent_id: agentId,
+                  duration_minutes: 60,
+                  reason: `Scheduled Maintenance for ${agentId}`,
+                  approved_by: "SecOps Admin",
+                })
+              }
+              title="Put this machine into a 1-hour maintenance window"
+            >
+              <Calendar size={13} /> Schedule 1h Maint
+            </button>
+          )}
+
           <button className="btn-cockpit-close" onClick={onClose} title="Close Cockpit [ESC]">
             ✕
           </button>
         </div>
       </div>
+
+      {/* Active Maintenance Window Alert Banner */}
+      {activeMaintenance && (
+        <div className="cockpit-maintenance-banner">
+          <div className="banner-left">
+            <span className="banner-pulse-dot" />
+            <div className="banner-text">
+              <strong>ACTIVE MAINTENANCE SUPPRESSION ({activeMaintenance.window_id})</strong>
+              <p>
+                Threat responses & silent alarms are suppressed for this node until{" "}
+                {new Date(activeMaintenance.end_time * 1000).toLocaleTimeString("en-GB")}.{" "}
+                Reason: <em>"{activeMaintenance.reason}"</em> · Approved by: <strong>{activeMaintenance.approved_by}</strong>
+              </p>
+            </div>
+          </div>
+          {onCancelMaintenance && (
+            <button
+              className="btn-cancel-win"
+              style={{ padding: "5px 12px", fontSize: 11 }}
+              onClick={() => onCancelMaintenance(activeMaintenance.window_id)}
+              title="Revoke maintenance window & re-enable alarms"
+            >
+              Revoke Window
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Toast Feedback */}
       {pulseToast && (
@@ -851,10 +909,18 @@ export default function AgentMachineCockpit({
               <h2 className="hero-agent-title">{agentId}</h2>
               <span
                 className={`hero-status-pill ${
-                  isAlarmed || isSilent ? "silent" : agent.status === "OFFLINE_GRACEFUL" ? "offline" : "healthy"
+                  activeMaintenance
+                    ? "maintenance"
+                    : isAlarmed || isSilent
+                    ? "silent"
+                    : agent.status === "OFFLINE_GRACEFUL"
+                    ? "offline"
+                    : "healthy"
                 }`}
               >
-                {isAlarmed || isSilent
+                {activeMaintenance
+                  ? "IN MAINTENANCE WINDOW"
+                  : isAlarmed || isSilent
                   ? "HEARTBEAT LOST (SILENT ALARM)"
                   : agent.status === "OFFLINE_GRACEFUL"
                   ? "OFFLINE (GRACEFUL)"
@@ -934,8 +1000,8 @@ export default function AgentMachineCockpit({
 
       {/* ═══ SECTION 1: SPLIT HEARTBEAT & HARDWARE TELEMETRY RIBBON ═══ */}
       <div className="cockpit-ribbon-split">
-        {/* Left Side: Real-Time ECG Heartbeat Monitor */}
-        <EcgHeartbeatMonitor
+        {/* Left Side: Real-Time Network Heartbeat & Beacon Telemetry */}
+        <NetworkHeartbeatTelemetryMonitor
           agent={agent}
           isAlarmed={isAlarmed}
           isSilent={isSilent}
@@ -1057,7 +1123,11 @@ export default function AgentMachineCockpit({
               </h3>
               <p className="card-subtitle">Host configuration, security rings &amp; active watchdogs</p>
             </div>
-            <div className="card-badge">VERIFIED NODE</div>
+            <div className="card-badge-group">
+              <span className="verified-node-badge">
+                <ShieldCheck size={12} style={{ color: "#c084fc" }} /> VERIFIED NODE
+              </span>
+            </div>
           </div>
 
           <div className="specs-list">

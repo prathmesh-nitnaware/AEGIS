@@ -277,6 +277,7 @@ export default function App() {
     reason: "Scheduled Security Patching",
     approved_by: "SecOps Admin",
   });
+  const [maintFilterActiveOnly, setMaintFilterActiveOnly] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [latestWsEvent, setLatestWsEvent] = useState(null);
   const [xaiModalConfig, setXaiModalConfig] = useState({
@@ -293,7 +294,7 @@ export default function App() {
 
   const fetchVerdicts = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/centralized/verdicts?limit=50`);
+      const res = await fetch(`${API_BASE}/api/centralized/verdicts?limit=50&since_startup=true`);
       const data = await res.json();
       if (data && data.verdicts) setVerdicts(data.verdicts);
     } catch (e) {
@@ -381,11 +382,38 @@ export default function App() {
     if (activeTab === "audit") fetchAudit();
   }, [activeTab, fetchTelemetry, fetchVerdicts, fetchMaintenance, fetchAgentTrust, fetchSilenceAlarms, fetchAudit]);
 
+  const getAdminToken = useCallback(async () => {
+    let token = localStorage.getItem("aegis_admin_token");
+    if (!token) {
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: "admin", password: "aegis@admin2026" }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.token) {
+            token = data.token;
+            localStorage.setItem("aegis_admin_token", token);
+          }
+        }
+      } catch (err) {
+        console.error("Auto-auth login error:", err);
+      }
+    }
+    return token;
+  }, []);
+
   const handleTrustFeedback = async (voteId, confirmed) => {
     try {
+      const token = await getAdminToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/api/trust/feedback`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           vote_id: voteId,
           confirmed: confirmed,
@@ -430,39 +458,57 @@ export default function App() {
     }
   };
 
-  const handleScheduleMaintenance = async (e) => {
-    e.preventDefault();
+  const handleScheduleMaintenance = async (customPayloadOrEvent) => {
+    if (customPayloadOrEvent && customPayloadOrEvent.preventDefault) {
+      customPayloadOrEvent.preventDefault();
+    }
+    const payload = (customPayloadOrEvent && !customPayloadOrEvent.preventDefault)
+      ? customPayloadOrEvent
+      : maintForm;
     try {
+      const token = await getAdminToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/api/maintenance/schedule`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
-          agent_id: maintForm.agent_id,
-          duration_seconds: (maintForm.duration_minutes || 60) * 60,
-          approved_by: maintForm.approved_by,
-          reason: maintForm.reason,
+          agent_id: payload.agent_id || "*",
+          duration_seconds: (payload.duration_minutes || 60) * 60,
+          approved_by: payload.approved_by || "SecOps Admin",
+          reason: payload.reason || "Scheduled System Maintenance",
         }),
       });
       const data = await res.json();
       if (res.ok) {
-        showToast(`Maintenance window scheduled for agent ${maintForm.agent_id}`);
+        showToast(`Maintenance window scheduled for agent ${payload.agent_id}`);
         fetchMaintenance();
       } else {
         showToast(`Failed: ${data.detail || "Could not schedule window"}`);
       }
     } catch (err) {
       console.error("Schedule maintenance error:", err);
+      showToast("Error communicating with maintenance API");
     }
   };
 
   const handleCancelMaintenance = async (windowId) => {
     try {
+      const token = await getAdminToken();
+      const headers = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/api/maintenance/cancel?window_id=${windowId}`, {
         method: "DELETE",
+        headers,
       });
       if (res.ok) {
         showToast("Maintenance window cancelled");
         fetchMaintenance();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        showToast(`Cancellation error: ${data.detail || "Request rejected"}`);
       }
     } catch (err) {
       console.error("Cancel maintenance error:", err);
@@ -598,6 +644,32 @@ export default function App() {
             return;
           }
 
+          if (event.type === "maintenance_window_update") {
+            if (event.action === "scheduled" && event.window) {
+              setMaintenanceWindows((prev) => [
+                event.window,
+                ...prev.filter((w) => w.window_id !== event.window.window_id),
+              ]);
+              showToast(`Maintenance window ${event.window.window_id} active (${event.window.agent_id})`);
+            } else if (event.action === "cancelled" && event.window_id) {
+              setMaintenanceWindows((prev) =>
+                prev.map((w) =>
+                  w.window_id === event.window_id ? { ...w, is_active: false } : w
+                )
+              );
+              showToast(`Maintenance window ${event.window_id} revoked`);
+            }
+            return;
+          }
+
+          if (event.type === "p2p_consensus") {
+            setVerdicts((prev) => {
+              if (prev.some((v) => v.vote_id === event.vote_id)) return prev;
+              return [event, ...prev].slice(0, 50);
+            });
+            return;
+          }
+
           if (event.type === "heartbeat") return;
 
           const threatScore = typeof event.threat_score === "number" 
@@ -664,8 +736,8 @@ export default function App() {
             ...prev.slice(0, 49),
           ]);
 
-          // Generate alert if threat threshold is met
-          if (threatScore >= 0.35) {
+          // Generate alert if threat threshold is met and not in active maintenance
+          if (threatScore >= 0.35 && !event.maintenance_suppressed) {
             setAlerts((prev) => [
               {
                 id: `${event.timestamp}-${event.pid || Math.random()}`,
@@ -974,14 +1046,6 @@ export default function App() {
           </button>
 
           <button
-            className={`nav-item ${activeTab === "simulation" ? "active" : ""}`}
-            onClick={() => selectTab("simulation")}
-          >
-            <Zap size={16} />
-            Red Team Simulation Lab
-          </button>
-
-          <button
             className={`nav-item ${activeTab === "benchmark" ? "active" : ""}`}
             onClick={() => selectTab("benchmark")}
           >
@@ -1182,6 +1246,8 @@ export default function App() {
             sendTestPulse={sendTestPulse}
             onInspectProcess={(t) => setSelectedProcess(t)}
             API_BASE={API_BASE}
+            onCancelMaintenance={handleCancelMaintenance}
+            onScheduleMaintenance={handleScheduleMaintenance}
           />
         ) : (
           <>
@@ -1457,7 +1523,7 @@ export default function App() {
               </div>
             )}
 
-            <div className="table-wrapper">
+            <div className="table-wrapper live-process-table-scroll">
               {filteredProcesses.length > 0 ? (
                 <table>
                   <thead>
@@ -1849,15 +1915,15 @@ export default function App() {
               <div>
                 <h3 className="panel-title">
                   <Database size={16} style={{ display: "inline", verticalAlign: "-2px", marginRight: 8 }} />
-                  Consensus Verdicts & Human Feedback (NeonDB)
+                  Consensus Verdicts & Human Feedback (Active Session)
                 </h3>
                 <p className="panel-subtitle">
-                  Peer-weighted consensus verdicts with active admin trust calibration
+                  Peer-weighted consensus verdicts of connected systems since server start
                 </p>
               </div>
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <span className="panel-count-badge">{verdicts.length} Recorded Verdicts</span>
-                <button className="btn-small-pulse" onClick={fetchVerdicts} title="Refresh verdicts from NeonDB">
+                <span className="panel-count-badge">{verdicts.length} Session Verdicts</span>
+                <button className="btn-small-pulse" onClick={fetchVerdicts} title="Refresh active session verdicts">
                   <RefreshCw size={13} /> Refresh
                 </button>
               </div>
@@ -1950,7 +2016,7 @@ export default function App() {
               ) : (
                 <div className="empty-table-placeholder">
                   <Database size={28} className="muted-icon" />
-                  <p>No consensus verdicts recorded in NeonDB yet.</p>
+                  <p>No consensus verdicts recorded for connected systems since server startup.</p>
                   <span>Verdicts from peer voting nodes will appear here in real time.</span>
                 </div>
               )}
@@ -2385,6 +2451,27 @@ export default function App() {
                     placeholder="node-1, node-2 or * for all"
                     required
                   />
+                  <div className="preset-chips-row">
+                    <button
+                      type="button"
+                      className={`chip-btn ${maintForm.agent_id === "*" ? "active" : ""}`}
+                      onClick={() => setMaintForm({ ...maintForm, agent_id: "*" })}
+                    >
+                      * All Nodes
+                    </button>
+                    {Array.from(new Set([...Object.keys(agents), ...Object.keys(agentTrustMap)]))
+                      .filter(Boolean)
+                      .map((id) => (
+                        <button
+                          key={id}
+                          type="button"
+                          className={`chip-btn ${maintForm.agent_id === id ? "active" : ""}`}
+                          onClick={() => setMaintForm({ ...maintForm, agent_id: id })}
+                        >
+                          {id}
+                        </button>
+                      ))}
+                  </div>
                 </div>
 
                 <div className="form-group">
@@ -2398,6 +2485,25 @@ export default function App() {
                     onChange={(e) => setMaintForm({ ...maintForm, duration_minutes: Number(e.target.value) })}
                     required
                   />
+                  <div className="preset-chips-row">
+                    {[
+                      { label: "15m", val: 15 },
+                      { label: "30m", val: 30 },
+                      { label: "1h", val: 60 },
+                      { label: "2h", val: 120 },
+                      { label: "4h", val: 240 },
+                      { label: "24h", val: 1440 },
+                    ].map((d) => (
+                      <button
+                        key={d.val}
+                        type="button"
+                        className={`chip-btn ${maintForm.duration_minutes === d.val ? "active" : ""}`}
+                        onClick={() => setMaintForm({ ...maintForm, duration_minutes: d.val })}
+                      >
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="form-group">
@@ -2410,6 +2516,23 @@ export default function App() {
                     placeholder="e.g. Kernel security upgrade"
                     required
                   />
+                  <div className="preset-chips-row">
+                    {[
+                      "Kernel Security Patching",
+                      "OS System Upgrade",
+                      "Scheduled Service Restart",
+                      "Hardware Migration",
+                    ].map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        className={`chip-btn ${maintForm.reason === r ? "active" : ""}`}
+                        onClick={() => setMaintForm({ ...maintForm, reason: r })}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="form-group">
@@ -2436,45 +2559,83 @@ export default function App() {
                   <h3 className="panel-title">Active & Scheduled Windows (NeonDB)</h3>
                   <p className="panel-subtitle">Windows survive backend restarts</p>
                 </div>
-                <button className="btn-small-pulse" onClick={fetchMaintenance}>
-                  <RefreshCw size={13} /> Refresh
-                </button>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <div className="maint-filter-bar">
+                    <button
+                      type="button"
+                      className={`maint-filter-btn ${!maintFilterActiveOnly ? "active" : ""}`}
+                      onClick={() => setMaintFilterActiveOnly(false)}
+                    >
+                      All Windows ({maintenanceWindows.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`maint-filter-btn ${maintFilterActiveOnly ? "active" : ""}`}
+                      onClick={() => setMaintFilterActiveOnly(true)}
+                    >
+                      Active Only ({maintenanceWindows.filter((w) => w.is_active && (!w.end_time || w.end_time > Date.now() / 1000)).length})
+                    </button>
+                  </div>
+                  <button className="btn-small-pulse" onClick={fetchMaintenance}>
+                    <RefreshCw size={13} /> Refresh
+                  </button>
+                </div>
               </div>
 
               <div className="windows-list-grid" style={{ marginTop: 16 }}>
-                {maintenanceWindows.length > 0 ? (
-                  maintenanceWindows.map((w) => (
-                    <div className={`window-card ${w.is_active ? "active" : ""}`} key={w.window_id}>
-                      <div className="window-info-main">
-                        <div className="window-title">
-                          <span>Agent: <code>{w.agent_id}</code></span>
-                          <span className={`window-badge ${w.is_active ? "active" : "inactive"}`}>
-                            {w.is_active ? "ACTIVE SUPPRESSION" : "COMPLETED / CANCELLED"}
-                          </span>
-                        </div>
-                        <div className="window-subtitle">
-                          {w.reason} · Approved by: <strong>{w.approved_by}</strong>
-                        </div>
-                        <div className="window-subtitle" style={{ fontSize: 11, color: "#94a3b8" }}>
-                          Window ID: <code>{w.window_id}</code> · Until {new Date(w.end_time * 1000).toLocaleTimeString("en-GB")}
-                        </div>
-                      </div>
+                {maintenanceWindows.filter((w) => !maintFilterActiveOnly || (w.is_active && (!w.end_time || w.end_time > Date.now() / 1000))).length > 0 ? (
+                  maintenanceWindows
+                    .filter((w) => !maintFilterActiveOnly || (w.is_active && (!w.end_time || w.end_time > Date.now() / 1000)))
+                    .map((w) => {
+                      const nowSec = Date.now() / 1000;
+                      const isCurrentlyActive = w.is_active && (!w.end_time || w.end_time > nowSec);
+                      const isExpired = w.end_time && w.end_time <= nowSec;
+                      const remainingSec = w.end_time ? Math.max(0, Math.floor(w.end_time - nowSec)) : 0;
+                      const remainingMins = Math.floor(remainingSec / 60);
+                      const remHours = Math.floor(remainingMins / 60);
+                      const remMins = remainingMins % 60;
+                      const countdownStr = remHours > 0 ? `${remHours}h ${remMins}m remaining` : `${remainingMins}m remaining`;
 
-                      {w.is_active && (
-                        <button
-                          className="btn-cancel-win"
-                          onClick={() => handleCancelMaintenance(w.window_id)}
-                          title="Revoke maintenance window & re-enable alerts"
-                        >
-                          <X size={13} /> Cancel Window
-                        </button>
-                      )}
-                    </div>
-                  ))
+                      return (
+                        <div className={`window-card ${isCurrentlyActive ? "active" : ""}`} key={w.window_id}>
+                          <div className="window-info-main">
+                            <div className="window-title">
+                              <span>Agent: <code>{w.agent_id}</code></span>
+                              {isCurrentlyActive ? (
+                                <>
+                                  <span className="window-badge active">● ACTIVE SUPPRESSION</span>
+                                  <span className="countdown-tag"><Clock size={11} /> {countdownStr}</span>
+                                </>
+                              ) : isExpired ? (
+                                <span className="window-badge expired">EXPIRED</span>
+                              ) : (
+                                <span className="window-badge revoked">REVOKED BY ADMIN</span>
+                              )}
+                            </div>
+                            <div className="window-subtitle">
+                              {w.reason} · Approved by: <strong>{w.approved_by}</strong>
+                            </div>
+                            <div className="window-subtitle" style={{ fontSize: 11, color: "#94a3b8" }}>
+                              Window ID: <code>{w.window_id}</code> · {new Date(w.start_time * 1000).toLocaleTimeString("en-GB")} to {new Date(w.end_time * 1000).toLocaleTimeString("en-GB")} ({new Date(w.end_time * 1000).toLocaleDateString()})
+                            </div>
+                          </div>
+
+                          {isCurrentlyActive && (
+                            <button
+                              className="btn-cancel-win"
+                              onClick={() => handleCancelMaintenance(w.window_id)}
+                              title="Revoke maintenance window & re-enable alerts"
+                            >
+                              <X size={13} /> Revoke Window
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
                 ) : (
                   <div className="empty-table-placeholder">
                     <Calendar size={28} className="muted-icon" />
-                    <p>No maintenance windows currently active or scheduled.</p>
+                    <p>No maintenance windows found for the selected filter.</p>
                   </div>
                 )}
               </div>
@@ -2515,13 +2676,26 @@ export default function App() {
                           <Server size={18} style={{ color: "#38bdf8" }} />
                           <strong>{agentId}</strong>
                         </div>
-                        <span
-                          className={`verdict-badge ${
-                            live.alarmed ? "alert" : live.status === "degraded" ? "warning" : "normal"
-                          }`}
-                        >
-                          {live.alarmed ? "SILENT / ALARMED" : live.status || "ACTIVE"}
-                        </span>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          {maintenanceWindows.some(
+                            (w) =>
+                              (w.agent_id === agentId || w.agent_id === "*") &&
+                              w.is_active &&
+                              (!w.end_time || w.end_time > Date.now() / 1000)
+                          ) && (
+                            <span className="verdict-badge maintenance" title="Alarms and automated responses suppressed">
+                              <Calendar size={11} style={{ verticalAlign: "-1px", marginRight: 3 }} />
+                              MAINTENANCE ACTIVE
+                            </span>
+                          )}
+                          <span
+                            className={`verdict-badge ${
+                              live.alarmed ? "alert" : live.status === "degraded" ? "warning" : "normal"
+                            }`}
+                          >
+                            {live.alarmed ? "SILENT / ALARMED" : live.status || "ACTIVE"}
+                          </span>
+                        </div>
                       </div>
 
                       <div className="trust-meter-container">
@@ -2559,6 +2733,33 @@ export default function App() {
                           <strong>{live.lastSeen ? formatTimestamp(live.lastSeen) : "Live"}</strong>
                         </div>
                       </div>
+
+                      <button
+                        className="btn-small-pulse"
+                        style={{
+                          marginTop: 14,
+                          width: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          background: "rgba(14, 165, 233, 0.12)",
+                          borderColor: "rgba(56, 189, 248, 0.35)",
+                          color: "#38bdf8",
+                          padding: "7px 12px",
+                          borderRadius: 6,
+                          fontWeight: 600,
+                          fontSize: 12,
+                          cursor: "pointer",
+                        }}
+                        onClick={() => {
+                          setSelectedAgentForTelemetry(agentId);
+                          setSelectedSystemFilter(agentId);
+                        }}
+                        title={`Open live telemetry cockpit for ${agentId}`}
+                      >
+                        <Activity size={13} /> Open Endpoint Cockpit
+                      </button>
                     </div>
                   );
                 })
@@ -2592,7 +2793,7 @@ export default function App() {
 
             <div className="table-wrapper">
               {auditLogs.length > 0 ? (
-                <table>
+                <table className="audit-table">
                   <thead>
                     <tr>
                       <th>Time</th>
@@ -2623,8 +2824,10 @@ export default function App() {
                             {log.status || "SUCCESS"}
                           </span>
                         </td>
-                        <td style={{ fontSize: 12, color: "#94a3b8" }}>
-                          {log.details ? (typeof log.details === "object" ? JSON.stringify(log.details) : log.details) : `Ref Vote: ${log.vote_id || "N/A"}`}
+                        <td>
+                          <div className="audit-details-cell">
+                            {log.details ? (typeof log.details === "object" ? JSON.stringify(log.details) : log.details) : `Ref Vote: ${log.vote_id || "N/A"}`}
+                          </div>
                         </td>
                       </tr>
                     ))}

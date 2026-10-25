@@ -41,6 +41,8 @@ code {
 
 .sidebar {
   width: 260px;
+  min-width: 260px;
+  flex-shrink: 0;
   min-height: 100vh;
   background: #0b1019;
   border-right: 1px solid #1c2533;
@@ -191,6 +193,8 @@ code {
 
 .main {
   flex: 1;
+  min-width: 0;
+  width: 100%;
   padding: 28px 36px;
   max-width: 1650px;
 }
@@ -644,6 +648,41 @@ code {
 
 .table-wrapper {
   overflow-x: auto;
+}
+
+.live-process-table-scroll {
+  max-height: 516px;
+  overflow-y: auto;
+  overflow-x: auto;
+  border: 1px solid rgba(30, 41, 59, 0.7);
+  border-radius: 8px;
+}
+
+.live-process-table-scroll table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #111723;
+  box-shadow: 0 1px 0 #1c2533;
+}
+
+.live-process-table-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.live-process-table-scroll::-webkit-scrollbar-track {
+  background: #0b1019;
+  border-radius: 4px;
+}
+
+.live-process-table-scroll::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.35);
+  border-radius: 4px;
+}
+
+.live-process-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: #38bdf8;
 }
 
 table {
@@ -1370,6 +1409,143 @@ tr.highlight-row {
   border-color: #ef4444;
 }
 
+/* Preset Quick-Select Chips */
+.preset-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.chip-btn {
+  background: #111827;
+  border: 1px solid #1f293d;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.chip-btn:hover {
+  border-color: #38bdf8;
+  color: #f1f5f9;
+  background: #1e293b;
+}
+
+.chip-btn.active {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: #38bdf8;
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.countdown-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.window-badge.expired {
+  background: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.window-badge.revoked {
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.verdict-badge.maintenance {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+}
+
+.hero-status-pill.maintenance {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+}
+
+/* Cockpit Maintenance Warning Banner */
+.cockpit-maintenance-banner {
+  background: linear-gradient(90deg, rgba(14, 165, 233, 0.15) 0%, rgba(15, 23, 42, 0.95) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 8px;
+  padding: 12px 18px;
+  margin: 12px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  box-shadow: 0 4px 16px rgba(14, 165, 233, 0.15);
+}
+
+.cockpit-maintenance-banner .banner-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.banner-pulse-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 10px #38bdf8;
+  animation: pulse 1.8s infinite;
+  flex-shrink: 0;
+}
+
+.cockpit-maintenance-banner .banner-text strong {
+  font-size: 13px;
+  color: #38bdf8;
+  letter-spacing: 0.5px;
+  display: block;
+}
+
+.cockpit-maintenance-banner .banner-text p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.maint-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.maint-filter-btn {
+  background: transparent;
+  border: 1px solid #1e293b;
+  color: #94a3b8;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.maint-filter-btn.active {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: #38bdf8;
+  color: #38bdf8;
+  font-weight: 600;
+}
+
 /* ═══════════════════════════════════════════════
    Agent Fleet & Trust Cards
    ═══════════════════════════════════════════════ */
@@ -1500,6 +1676,34 @@ tr.highlight-row {
 .audit-status-tag.BLOCKED {
   background: rgba(239, 68, 68, 0.15);
   color: #f87171;
+}
+
+.audit-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.audit-table th:nth-child(1), .audit-table td:nth-child(1) { width: 14%; white-space: nowrap; }
+.audit-table th:nth-child(2), .audit-table td:nth-child(2) { width: 12%; word-break: break-all; }
+.audit-table th:nth-child(3), .audit-table td:nth-child(3) { width: 15%; }
+.audit-table th:nth-child(4), .audit-table td:nth-child(4) { width: 15%; word-break: break-all; }
+.audit-table th:nth-child(5), .audit-table td:nth-child(5) { width: 10%; }
+.audit-table th:nth-child(6), .audit-table td:nth-child(6) { 
+  width: 34%; 
+  word-break: break-word; 
+  overflow-wrap: anywhere; 
+}
+
+.audit-details-cell {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 11px;
+  color: #94a3b8;
+  max-height: 80px;
+  overflow-y: auto;
 }
 
 @keyframes fadeIn {
@@ -3255,6 +3459,77 @@ tr.highlight-row {
   box-shadow: 0 0 6px #38bdf8;
 }
 
+/* Beacon Radar Box & High-Tech Core */
+.beacon-radar-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(14, 165, 233, 0.06);
+  border: 1px solid rgba(14, 165, 233, 0.2);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.beacon-radar-pulse {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.radar-ping-ring {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 1.5px solid #38bdf8;
+  opacity: 0.6;
+  animation: radarPing 2.2s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+}
+
+@keyframes radarPing {
+  0% { transform: scale(0.6); opacity: 0.9; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+.beacon-radar-pulse.flash .radar-ping-ring {
+  border-color: #00f0ff;
+  animation: flashRing 0.6s ease-out;
+}
+
+@keyframes flashRing {
+  0% { transform: scale(0.8); opacity: 1; box-shadow: 0 0 14px #00f0ff; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+.beacon-radar-pulse.dead .radar-ping-ring {
+  border-color: #ef4444;
+  animation: none;
+  opacity: 0.3;
+}
+
+.radar-center-core {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.beacon-radar-text {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
 /* Machine CPU Usage & Hardware Telemetry Monitor Frame */
 .cpu-monitor-frame {
   background: #040914;
@@ -3312,10 +3587,10 @@ tr.highlight-row {
 
 .cpu-body-grid {
   display: grid;
-  grid-template-columns: 140px 1fr;
+  grid-template-columns: 155px 1fr;
   gap: 16px;
   align-items: stretch;
-  height: 165px;
+  height: 175px;
 }
 
 @media (max-width: 600px) {
@@ -3415,6 +3690,38 @@ tr.highlight-row {
   color: #64748b;
 }
 
+/* Symmetrical Mini Metrics Chips */
+.cpu-mini-metrics {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+
+.cpu-metric-chip {
+  flex: 1;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  border-radius: 6px;
+  padding: 4px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chip-key {
+  font-family: var(--font-mono, monospace);
+  font-size: 8px;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 0.5px;
+}
+
+.chip-val {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .cpu-chart-pane {
   display: flex;
   flex-direction: column;
@@ -3435,7 +3742,25 @@ tr.highlight-row {
 
 .cpu-mini-chart {
   width: 100%;
-  height: 135px;
+  height: 118px;
+}
+
+.cpu-footer-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  color: #64748b;
+  border-top: 1px solid rgba(30, 41, 59, 0.5);
+  padding-top: 4px;
+  margin-top: 2px;
+}
+
+.cpu-foot-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
 }
 
 .cpu-tooltip {
@@ -3475,10 +3800,43 @@ tr.highlight-row {
   flex-direction: column;
 }
 
+.cockpit-card .card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.cockpit-card .card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 0 0 4px 0;
+  letter-spacing: -0.2px;
+}
+
+.cockpit-card .card-subtitle {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.cockpit-card .card-badge-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .cockpit-chart-container {
   height: 230px;
   width: 100%;
-  margin-top: 10px;
+  margin-top: 6px;
 }
 
 .live-indicator-badge {
@@ -3489,9 +3847,26 @@ tr.highlight-row {
   font-weight: 700;
   color: #38bdf8;
   background: rgba(56, 189, 248, 0.12);
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  padding: 2px 7px;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  padding: 3px 8px;
   border-radius: 4px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.verified-node-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #c084fc;
+  background: rgba(168, 85, 247, 0.14);
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 
 .pulsing-green-dot {
@@ -3655,6 +4030,14 @@ tr.highlight-row {
   overflow-y: auto;
   border: 1px solid rgba(30, 41, 59, 0.7);
   border-radius: 8px;
+}
+
+.cockpit-table-wrapper table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #111723;
+  box-shadow: 0 1px 0 #1c2533;
 }
 
 .cockpit-proc-cell {

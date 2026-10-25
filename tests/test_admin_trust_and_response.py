@@ -146,3 +146,22 @@ class TestMaintenancePortalFastAPIEndpoints:
         res_cancel = client.delete(f"/api/maintenance/cancel?window_id={window_id}", headers=admin_headers)
         assert res_cancel.status_code == 200
         assert res_cancel.json()["status"] == "cancelled"
+
+        # Cleanup test record so unit tests do not pollute NeonDB / dashboard history
+        from backend.telemetry_api import maintenance_portal
+        with maintenance_portal._lock:
+            maintenance_portal._windows.pop(window_id, None)
+
+        import asyncio
+        from backend.db.database import get_session
+        from sqlalchemy import delete
+        from backend.db.models import MaintenanceWindowRecord
+
+        async def _cleanup_test_row():
+            async with get_session() as session:
+                await session.execute(
+                    delete(MaintenanceWindowRecord).where(MaintenanceWindowRecord.window_id == window_id)
+                )
+                await session.commit()
+
+        asyncio.run(_cleanup_test_row())

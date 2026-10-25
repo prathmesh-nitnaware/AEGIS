@@ -44,6 +44,7 @@ from backend.db.repository import (
     persist_maintenance_window,
     cancel_maintenance_window_db,
     load_active_maintenance_windows,
+    load_all_maintenance_windows,
     upsert_agent_trust,
     get_agent_trust,
     get_all_agent_trust,
@@ -86,9 +87,20 @@ local_trust_tracker = AgentTrustTracker(db_path="aegis_central_trust.db")
 def _on_silent_alarm(alarm_payload: dict):
     """
     Called from SilenceDetector's background thread when an agent goes silent.
-    - Publishes the alarm over WebSocket to connected dashboards
+    - Suppressed if the agent is currently in an active maintenance window
+    - Otherwise publishes the alarm over WebSocket to connected dashboards
     - Persists the alarm to NeonDB (fire-and-forget via asyncio)
     """
+    agent_id = alarm_payload.get("agent_id")
+    if agent_id:
+        in_maint, win = maintenance_portal.is_in_maintenance(agent_id)
+        if in_maint and win:
+            logger.info(
+                "[SilenceDetector] Suppressing silent alarm for agent '%s' (active maintenance window %s: '%s')",
+                agent_id, win.window_id, win.reason,
+            )
+            return
+
     publish_event({**alarm_payload, "type": "agent_alarm"})
     # Persist to DB — schedule on the event loop
     if api_loop is not None:
@@ -516,6 +528,32 @@ async def post_telemetry(event: dict, request: Request):
     proc_name = event.get("process") or event.get("process_name") or "unknown"
     pid = event.get("pid", 0)
 
+    # ── Maintenance Window Suppression Evaluation ──
+    in_maint, win = maintenance_portal.is_in_maintenance(agent_id)
+    if in_maint and win:
+        raw_score = float(threat_score) if threat_score is not None else 0.0
+        is_suppressed, adjusted_score, reason = admin_trust_engine.evaluate_event(
+            agent_id=agent_id,
+            event_type=model,
+            raw_threat_score=raw_score,
+            process_name=proc_name,
+        )
+        if is_suppressed:
+            event["raw_threat_score"] = raw_score
+            event["threat_score"] = adjusted_score
+            event["score"] = adjusted_score
+            event["predicted_class"] = f"Normal (Suppressed by Maintenance Window {win.window_id})"
+            event["verdict"] = "Normal"
+            event["maintenance_suppressed"] = True
+            event["maintenance_window_id"] = win.window_id
+            event["maintenance_reason"] = win.reason
+            threat_score = adjusted_score
+            verdict = event["predicted_class"]
+            logger.info(
+                "[MaintenanceSuppression] Suppressed threat on agent '%s' (raw=%.2f -> 0.00): %s",
+                agent_id, raw_score, reason,
+            )
+
     logger.info(
         "[AEGIS Telemetry Ingest] Agent: %-18s | IP: %-15s | Model: %-12s | Threat: %.3f (%s) | Process: %s (PID: %s)",
         agent_id,
@@ -823,12 +861,28 @@ async def post_p2p_consensus(verdict: P2PConsensusPayload):
     """
     verdict_dict = verdict.model_dump()
 
-    # 1. Evaluate policy authorization while preserving verdict's recommended action
-    decision = decide_response(verdict_dict)
-    if not verdict_dict.get("response_action"):
-        verdict_dict["response_action"] = verdict_dict.get("recommended_action") or decision["action"]
-    verdict_dict["authorized_action"] = decision["action"]
-    verdict_dict["response_policy_reason"] = decision["reason"]
+    # Maintenance Window Check: Suppress destructive automated mitigation for agents in active maintenance
+    in_maint, win = maintenance_portal.is_in_maintenance(verdict.origin_agent_id)
+    if in_maint and win:
+        verdict_dict["maintenance_suppressed"] = True
+        verdict_dict["maintenance_window_id"] = win.window_id
+        verdict_dict["maintenance_reason"] = win.reason
+        verdict_dict["authorized_action"] = "LOG"
+        verdict_dict["response_action"] = "LOG"
+        verdict_dict["severity"] = "LOW"
+        verdict_dict["response_policy_reason"] = f"Automated response suppressed by active maintenance window {win.window_id} ({win.reason})"
+        decision = {"action": "LOG", "reason": verdict_dict["response_policy_reason"]}
+        logger.info(
+            "[MaintenancePortal] Suppressing P2P consensus response for agent '%s' (Window %s): %s",
+            verdict.origin_agent_id, win.window_id, win.reason,
+        )
+    else:
+        # 1. Evaluate policy authorization while preserving verdict's recommended action
+        decision = decide_response(verdict_dict)
+        if not verdict_dict.get("response_action"):
+            verdict_dict["response_action"] = verdict_dict.get("recommended_action") or decision["action"]
+        verdict_dict["authorized_action"] = decision["action"]
+        verdict_dict["response_policy_reason"] = decision["reason"]
 
     # 2. Record external verdict in CentralizedVotingCoordinator history for deduplication
     central_coordinator.record_external_verdict(verdict_dict)
@@ -840,10 +894,12 @@ async def post_p2p_consensus(verdict: P2PConsensusPayload):
     except Exception as exc:
         logger.warning("[AEGIS DB] Failed to persist P2P consensus: %s", exc)
 
-    # 4. Auto-enqueue remote mitigation action if High/Critical or action warrants it
+    # 4. Auto-enqueue remote mitigation action if High/Critical or action warrants it (bypassed if in maintenance)
     action_dict = None
     auto_remediate_on = os.getenv("AEGIS_AUTO_REMEDIATE", "").strip().lower() in ("1", "true", "yes", "on")
-    if auto_remediate_on:
+    if in_maint:
+        response_act = "LOG"
+    elif auto_remediate_on:
         response_act = verdict_dict.get("authorized_action") or decision["action"]
     else:
         # In simulation / test mode, dispatch the realistic EDR countermeasure (e.g. BLOCK_REMOTE_IP, KILL_PROCESS)
@@ -1061,17 +1117,35 @@ async def post_centralized_vote(
         logger.warning(
             "[AEGIS DB] Failed to persist centralized verdict: %s", exc)
 
+    # Maintenance Window Check: Suppress destructive automated mitigation for agents in active maintenance
+    in_maint, win = maintenance_portal.is_in_maintenance(origin_agent_id)
+    if in_maint and win:
+        verdict["maintenance_suppressed"] = True
+        verdict["maintenance_window_id"] = win.window_id
+        verdict["maintenance_reason"] = win.reason
+        verdict["authorized_action"] = "LOG"
+        verdict["response_action"] = "LOG"
+        verdict["severity"] = "LOW"
+        verdict["response_policy_reason"] = f"Automated response suppressed by active maintenance window {win.window_id} ({win.reason})"
+        decision = {"action": "LOG", "reason": verdict["response_policy_reason"]}
+        logger.info(
+            "[MaintenancePortal] Suppressing centralized vote response for agent '%s' (Window %s): %s",
+            origin_agent_id, win.window_id, win.reason,
+        )
+    else:
         # Re-evaluate the action before queueing it.
-    policy_input = dict(verdict)
-    policy_input["details"] = details
-    decision = decide_response(policy_input)
+        policy_input = dict(verdict)
+        policy_input["details"] = details
+        decision = decide_response(policy_input)
+        verdict["authorized_action"] = decision["action"]
+        verdict["response_policy_reason"] = decision["reason"]
 
-    verdict["authorized_action"] = decision["action"]
-    verdict["response_policy_reason"] = decision["reason"]
     # ── Autonomous Remote Command Dispatcher: Auto-Enqueue Mitigation Actions ──
     action_dict = None
     auto_remediate_on = os.getenv("AEGIS_AUTO_REMEDIATE", "").strip().lower() in ("1", "true", "yes", "on")
-    if auto_remediate_on:
+    if in_maint:
+        response_act = "LOG"
+    elif auto_remediate_on:
         response_act = verdict.get("authorized_action") or decision["action"]
     else:
         # In simulation / test mode, dispatch the realistic EDR countermeasure (e.g. BLOCK_REMOTE_IP, KILL_PROCESS)
@@ -1142,11 +1216,17 @@ async def get_centralized_verdicts(
     offset: int = 0,
     severity: str | None = None,
     agent_id: str | None = None,
+    since_startup: bool = True,
+    all_history: bool = False,
 ):
     """
-    Retrieve paginated history of consensus verdicts from NeonDB.
-    Falls back to in-memory history if DB is unavailable.
+    Retrieve paginated consensus verdicts.
+    By default (since_startup=True and all_history=False), returns only verdicts
+    recorded after the server was started for active/connected systems, avoiding
+    stale DB history.
+    Falls back to in-memory coordinator history if DB is unavailable.
     """
+    since_ts = None if all_history or not since_startup else SERVER_START_TIME
     try:
         async with get_session() as session:
             rows = await get_verdicts_history(
@@ -1155,7 +1235,21 @@ async def get_centralized_verdicts(
                 offset=offset,
                 severity=severity,
                 agent_id=agent_id,
+                since_timestamp=since_ts,
             )
+            # If DB returned nothing for current session, also check in-memory coordinator
+            if not rows and not all_history:
+                in_mem = [
+                    v for v in central_coordinator.get_verdicts(limit=limit)
+                    if (not severity or v.get("severity") == severity)
+                    and (not agent_id or v.get("origin_agent_id") == agent_id)
+                    and (v.get("timestamp", v.get("verdict_timestamp", 0)) >= SERVER_START_TIME)
+                ]
+                return {
+                    "verdicts": in_mem,
+                    "count": len(in_mem),
+                    "source": "memory_session",
+                }
             return {
                 "verdicts": [
                     {
@@ -1180,8 +1274,14 @@ async def get_centralized_verdicts(
     except Exception as exc:
         logger.warning(
             "[AEGIS DB] Falling back to in-memory verdicts: %s", exc)
+        in_mem = [
+            v for v in central_coordinator.get_verdicts(limit=limit)
+            if (all_history or v.get("timestamp", v.get("verdict_timestamp", 0)) >= SERVER_START_TIME)
+            and (not severity or v.get("severity") == severity)
+            and (not agent_id or v.get("origin_agent_id") == agent_id)
+        ]
         return {
-            "verdicts": central_coordinator.get_verdicts(limit=limit),
+            "verdicts": in_mem,
             "source": "memory",
         }
 
@@ -1613,16 +1713,58 @@ async def schedule_maintenance_window(
         logger.warning(
             "[AEGIS DB] Failed to persist maintenance window: %s", exc)
 
+    # Broadcast real-time maintenance window schedule to dashboards
+    await broadcast({
+        "type": "maintenance_window_update",
+        "action": "scheduled",
+        "window": win.to_dict(),
+    })
+
     return {"status": "scheduled", "window": win.to_dict()}
 
 
 @app.get("/api/maintenance/windows")
 async def get_maintenance_windows(active_only: bool = True):
-    """List active or all recorded maintenance windows."""
+    """List active or all recorded maintenance windows (merging NeonDB and in-memory)."""
+    if not active_only:
+        try:
+            async with get_session() as session:
+                records = await load_all_maintenance_windows(session)
+                if records:
+                    now = time.time()
+                    return {
+                        "windows": [
+                            {
+                                "window_id": r.window_id,
+                                "agent_id": r.agent_id,
+                                "start_time": r.start_time,
+                                "end_time": r.end_time,
+                                "approved_by": r.approved_by,
+                                "reason": r.reason,
+                                "is_active": r.is_active and r.end_time > now,
+                            }
+                            for r in records
+                        ]
+                    }
+        except Exception as exc:
+            logger.warning("[AEGIS DB] Failed to fetch all maintenance windows from DB: %s", exc)
+
     return {"windows": maintenance_portal.list_windows(active_only=active_only)}
 
 
+@app.get("/api/maintenance/status/{agent_id}")
+async def get_agent_maintenance_status(agent_id: str):
+    """Check whether a specific agent is currently inside an active maintenance window."""
+    in_maint, win = maintenance_portal.is_in_maintenance(agent_id)
+    return {
+        "agent_id": agent_id,
+        "is_in_maintenance": in_maint,
+        "window": win.to_dict() if win else None,
+    }
+
+
 @app.delete("/api/maintenance/cancel")
+@app.post("/api/maintenance/cancel")
 async def cancel_maintenance_window(
     window_id: Optional[str] = None,
     payload: Optional[MaintenanceCancelPayload] = None,
@@ -1644,6 +1786,13 @@ async def cancel_maintenance_window(
     except Exception as exc:
         logger.warning(
             "[AEGIS DB] Failed to cancel maintenance window in DB: %s", exc)
+
+    # Broadcast cancellation to dashboards
+    await broadcast({
+        "type": "maintenance_window_update",
+        "action": "cancelled",
+        "window_id": wid,
+    })
 
     return {"status": "cancelled" if success else "not_found", "window_id": wid}
 
