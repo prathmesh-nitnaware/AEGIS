@@ -58,17 +58,28 @@ def decide_response(verdict: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(details, Mapping):
         details = {}
 
-    # A score alone never authorizes destructive action.
+    # Evaluation of whether destructive remediation is permitted:
+    # Requires AEGIS_AUTO_REMEDIATE=true AND either:
+    # 1. Swarm consensus corroborated across peer nodes, OR
+    # 2. Local emergency override (host-specific attack with critical score >= 0.90 where peers cannot observe local PIDs/files)
+    verdict_type = str(verdict.get("verdict_type", "")).upper()
+    is_local_emergency = (
+        verdict_type == "LOCAL_EMERGENCY_VERDICT"
+        or (not consensus and score >= float(os.getenv("AEGIS_KILL_THRESHOLD", "0.90")) and (severity == "CRITICAL" or score >= 0.90))
+    )
+    authorized_for_remediation = _enabled("AEGIS_AUTO_REMEDIATE", False) and (consensus or is_local_emergency)
+
+    # Base triage baseline
     if score < 0.30:
         proposed = "LOG"
-    elif score < 0.60 or not consensus:
+    elif score < 0.60 or not authorized_for_remediation:
         proposed = "ALERT"
     else:
         proposed = "ALERT"
 
-    # Destructive response is opt-in and requires corroborated consensus.
+    # Destructive response is opt-in and requires corroborated consensus or a critical local emergency.
     # Even when enabled, validate the exact target before queueing.
-    if _enabled("AEGIS_AUTO_REMEDIATE", False) and consensus:
+    if authorized_for_remediation:
         if score >= float(os.getenv("AEGIS_KILL_THRESHOLD", "0.90")):
             pid = details.get("pid", verdict.get("target_pid"))
             process_name = details.get("process_name") or details.get("process")
@@ -120,7 +131,9 @@ def decide_response(verdict: Mapping[str, Any]) -> dict[str, Any]:
         "severity": severity,
         "consensus_reached": consensus,
         "reason": (
-            "destructive action is disabled or insufficiently corroborated"
+            "authorized via high-confidence local emergency override"
+            if proposed in DESTRUCTIVE_ACTIONS and not consensus
+            else "destructive action is disabled or insufficiently corroborated"
             if proposed == "ALERT" and (score >= 0.60 or not consensus)
             else "policy decision"
         ),

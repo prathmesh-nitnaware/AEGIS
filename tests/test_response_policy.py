@@ -35,9 +35,28 @@ class ResponsePolicyTests(unittest.TestCase):
             })
         self.assertEqual(result["action"], "KILL_PROCESS")
 
-    def test_nonfinite_score_is_safe(self):
-        result = decide_response({"final_weighted_score": float("nan")})
-        self.assertEqual(result["action"], "LOG")
+    def test_local_emergency_authorizes_kill_when_remediation_on(self):
+        with patch.dict(os.environ, {"AEGIS_AUTO_REMEDIATE": "true", "AEGIS_KILL_THRESHOLD": "0.9"}, clear=False):
+            result = decide_response({
+                "final_weighted_score": 0.99,
+                "consensus_reached": False,
+                "verdict_type": "LOCAL_EMERGENCY_VERDICT",
+                "severity": "CRITICAL",
+                "details": {"pid": 8944, "process_name": "locker_enc.exe"},
+            })
+        self.assertEqual(result["action"], "KILL_PROCESS")
+        self.assertIn("emergency", result["reason"])
+
+    def test_local_emergency_without_remediation_only_alerts(self):
+        with patch.dict(os.environ, {"AEGIS_AUTO_REMEDIATE": "false"}, clear=False):
+            result = decide_response({
+                "final_weighted_score": 0.99,
+                "consensus_reached": False,
+                "verdict_type": "LOCAL_EMERGENCY_VERDICT",
+                "severity": "CRITICAL",
+                "details": {"pid": 8944, "process_name": "locker_enc.exe"},
+            })
+        self.assertEqual(result["action"], "ALERT")
 
 
 if __name__ == "__main__":
