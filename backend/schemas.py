@@ -40,6 +40,7 @@ ALLOWED_ACTION_STATUSES = Literal[
     "NOT_FOUND",
     "DENIED",
     "SIMULATED",
+    "SIMULATED_SUCCESS",
     "EXECUTED",
 ]
 

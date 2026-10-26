@@ -1434,7 +1434,7 @@ async def api_ack_action_execution(
 
             # Terminal state check: prevent duplicate acks once terminal
             terminal_states = {"SUCCESS", "FAILED", "PARTIAL",
-                               "NOT_FOUND", "DENIED", "SIMULATED", "EXECUTED", "ERROR"}
+                               "NOT_FOUND", "DENIED", "SIMULATED", "SIMULATED_SUCCESS", "EXECUTED", "ERROR"}
             if existing.status and existing.status.upper() in terminal_states:
                 raise HTTPException(
                     status_code=409,

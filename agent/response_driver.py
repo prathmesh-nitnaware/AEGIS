@@ -125,7 +125,8 @@ class AgentResponseDriver:
         if simulation_mode is not None:
             self.response_mode = "simulation" if simulation_mode else "real"
         else:
-            self.response_mode = (response_mode or os.getenv("AEGIS_RESPONSE_MODE", "simulation")).lower()
+            raw_mode = (response_mode or os.getenv("AEGIS_RESPONSE_MODE", "simulation")).lower()
+            self.response_mode = "real" if raw_mode in ("real", "live") else "simulation"
 
         # Ensure quarantine folder exists
         self.quarantine_dir.mkdir(parents=True, exist_ok=True)
