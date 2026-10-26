@@ -164,7 +164,37 @@ function safeToISOString(ts) {
       if (!isNaN(d.getTime())) return d.toISOString();
     }
   } catch (e) {}
-  return new Date().toISOString();
+}
+
+function formatLocalTimestamp(ts) {
+  if (!ts) return "";
+  try {
+    let ms = ts;
+    if (typeof ts === "string") {
+      const parsed = Date.parse(ts);
+      if (!isNaN(parsed)) ms = parsed;
+      else {
+        const num = Number(ts);
+        if (!isNaN(num)) ms = num;
+      }
+    }
+    if (typeof ms === "number") {
+      if (ms > 1e14) ms = Math.floor(ms / 1000000);
+      else if (ms > 1e11) ms = Math.floor(ms / 1000);
+      else if (ms > 1e8 && ms < 1e11) ms = ms * 1000;
+    }
+    const d = new Date(ms);
+    if (!isNaN(d.getTime())) {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      const hours = String(d.getHours()).padStart(2, "0");
+      const minutes = String(d.getMinutes()).padStart(2, "0");
+      const seconds = String(d.getSeconds()).padStart(2, "0");
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    }
+  } catch (e) {}
+  return String(ts).replace("T", " ").slice(0, 19);
 }
 
 class ErrorBoundary extends Component {
@@ -307,7 +337,7 @@ export default function App() {
   const fetchTelemetry = useCallback(async () => {
     setIsTelemetryLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/centralized/telemetry?limit=50`);
+      const res = await fetch(`${API_BASE}/api/centralized/telemetry?limit=50&since_startup=true`);
       const data = await res.json();
       if (data && Array.isArray(data.telemetries)) {
         setTelemetryRecords(data.telemetries);
@@ -2171,14 +2201,25 @@ export default function App() {
                 </div>
               )}
 
-              <div className="table-wrapper" style={{ marginTop: 14 }}>
+              <div className="table-wrapper live-process-table-scroll" style={{ marginTop: 14 }}>
                 {(() => {
                   // Combine backend telemetry records with live processes and verdicts
                   const combinedRows = [];
                   const seenKeys = new Set();
+                  const connectedAgentIds = new Set(
+                    Object.keys(agents).length > 0
+                      ? Object.keys(agents)
+                      : knownSystems.map((s) => s.agentId)
+                  );
 
-                  // 1. Backend stored/live telemetries
+                  // 1. Backend stored/live telemetries (filtered to connected systems of current session)
                   telemetryRecords.forEach((item) => {
+                    const rowAid = item.agent_id || "agent-linux-01";
+                    // Only include records from connected/registered agents
+                    if (connectedAgentIds.size > 0 && !connectedAgentIds.has(rowAid)) {
+                      return;
+                    }
+
                     const payload = item.payload || {};
                     const pid = payload.pid ?? item.pid ?? (typeof payload.process_id === "number" ? payload.process_id : null);
                     const tName = item.event_type || payload.process || payload.process_name || payload.model || "System Telemetry";
@@ -2199,7 +2240,6 @@ export default function App() {
                       ? (matchedVerdict.consensus_reached ? "QUORUM_REACHED" : "PARTIAL_QUORUM")
                       : (score >= 0.5 ? "VOTING_IN_PROGRESS" : "VERIFIED_BENIGN");
 
-                    const rowAid = item.agent_id || "agent-linux-01";
                     const rowIp = item.ip || payload.ip || agents[rowAid]?.ip || "127.0.0.1";
 
                     combinedRows.push({
@@ -2219,6 +2259,11 @@ export default function App() {
 
                   // 2. Active processes in memory from live stream
                   processes.forEach((proc) => {
+                    const procAid = proc.agent_id || "agent-node-01";
+                    if (connectedAgentIds.size > 0 && !connectedAgentIds.has(procAid)) {
+                      return;
+                    }
+
                     const key = `${proc.process}-${proc.pid}`;
                     if (!seenKeys.has(key)) {
                       seenKeys.add(key);
@@ -2234,7 +2279,6 @@ export default function App() {
                         ? (matchedVerdict.consensus_reached ? "QUORUM_REACHED" : "PARTIAL_QUORUM")
                         : (proc.threat_score >= 0.5 ? "VOTING_IN_PROGRESS" : "VERIFIED_BENIGN");
 
-                      const procAid = proc.agent_id || "agent-node-01";
                       const procIp = proc.ip || agents[procAid]?.ip || "127.0.0.1";
 
                       combinedRows.push({
@@ -2253,12 +2297,15 @@ export default function App() {
                     }
                   });
 
-                  // 3. Fallback: historical verdicts from NeonDB
+                  // 3. Fallback: session verdicts for connected systems only
                   if (combinedRows.length === 0 && verdicts.length > 0) {
                     verdicts.forEach((v) => {
                       if (!v) return;
-                      const pid = v.details?.pid ?? (v.target_pid || null);
                       const vAid = v.origin_agent_id || "agent-linux";
+                      if (connectedAgentIds.size > 0 && !connectedAgentIds.has(vAid)) {
+                        return;
+                      }
+                      const pid = v.details?.pid ?? (v.target_pid || null);
                       const vIp = v.ip || agents[vAid]?.ip || "127.0.0.1";
                       combinedRows.push({
                         id: v.vote_id,
@@ -2330,7 +2377,7 @@ export default function App() {
                           <th>Threat Score</th>
                           <th>Peer Voting Verdict</th>
                           <th>Voting Status</th>
-                          <th>Timestamp</th>
+                          <th style={{ whiteSpace: "nowrap" }}>Timestamp</th>
                           <th style={{ textAlign: "right" }}>Action</th>
                         </tr>
                       </thead>
@@ -2416,10 +2463,8 @@ export default function App() {
                                   {row.voting_status}
                                 </span>
                               </td>
-                              <td style={{ fontSize: 12, color: "#94a3b8", fontFamily: "JetBrains Mono, monospace" }}>
-                                {typeof row.timestamp === "string" && row.timestamp.includes("T")
-                                  ? row.timestamp.replace("T", " ").slice(0, 19)
-                                  : row.timestamp}
+                              <td style={{ fontSize: 11, color: "#94a3b8", fontFamily: "JetBrains Mono, monospace", whiteSpace: "nowrap" }}>
+                                {formatLocalTimestamp(row.timestamp)}
                               </td>
                               <td style={{ textAlign: "right" }}>
                                 <button

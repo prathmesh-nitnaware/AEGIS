@@ -1022,11 +1022,16 @@ async def get_centralized_telemetry(
     min_score: float = 0.0,
     limit: int = 100,
     offset: int = 0,
+    since_startup: bool = True,
+    all_history: bool = False,
 ):
     """
     Query telemetry from NeonDB (persistent, paginated) with optional filters.
+    By default (since_startup=True and all_history=False), returns only telemetry
+    ingested since the server was started to avoid showing stale DB history.
     Falls back to in-memory repo if DB is unavailable.
     """
+    since_ts = None if all_history or not since_startup else SERVER_START_TIME
     try:
         async with get_session() as session:
             rows = await get_recent_telemetry(
@@ -1036,6 +1041,7 @@ async def get_centralized_telemetry(
                 min_score=min_score,
                 limit=limit,
                 offset=offset,
+                since_timestamp=since_ts,
             )
             return {
                 "telemetries": [
@@ -1060,6 +1066,8 @@ async def get_centralized_telemetry(
         telemetries = central_repo.query_telemetry(
             agent_id=agent_id, event_type=event_type, min_score=min_score, limit=limit
         )
+        if since_ts:
+            telemetries = [t for t in telemetries if t.get("received_at", 0) >= since_ts]
         for t in telemetries:
             aid = t.get("agent_id")
             if not t.get("ip"):

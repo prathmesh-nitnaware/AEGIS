@@ -118,6 +118,7 @@ async def get_recent_telemetry(
     min_score: float = 0.0,
     limit: int = 100,
     offset: int = 0,
+    since_timestamp: Optional[float] = None,
 ) -> List[TelemetryEvent]:
     """Paginated query of telemetry events with optional filters."""
     stmt = (
@@ -127,6 +128,8 @@ async def get_recent_telemetry(
         .limit(limit)
         .offset(offset)
     )
+    if since_timestamp is not None:
+        stmt = stmt.where(TelemetryEvent.received_at >= since_timestamp)
     if agent_id:
         stmt = stmt.where(TelemetryEvent.agent_id == agent_id)
     if event_type:

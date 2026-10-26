@@ -275,7 +275,79 @@ MODEL_FEATURE_SPECS = {
             },
         ],
     },
+    "hdfs": {
+        "model_name": "HDFS Distributed Log Pipeline (TF-IDF + XGBoost)",
+        "description": "Monitors distributed Hadoop file system block events, replication failures, and anomalous log patterns.",
+        "features": [
+            {
+                "name": "block_deletion_rate",
+                "label": "Unexpected Block Deletion Frequency",
+                "baseline": "0.1 /min",
+                "malicious_trigger": "> 35.0 /min",
+                "unit": "events/min",
+                "weight": 0.36,
+            },
+            {
+                "name": "verification_failure_spike",
+                "label": "Block Checksum Verification Failure",
+                "baseline": "0.00 /sec",
+                "malicious_trigger": "Detected (> 12/sec)",
+                "unit": "failures/s",
+                "weight": 0.32,
+            },
+            {
+                "name": "rereplication_queue_overflow",
+                "label": "Under-Replicated Block Queue Surge",
+                "baseline": "2 blocks",
+                "malicious_trigger": "> 240 blocks",
+                "unit": "blocks in queue",
+                "weight": 0.26,
+            },
+            {
+                "name": "unauthorized_namenode_rpc",
+                "label": "Unauthenticated NameNode RPC Access",
+                "baseline": "0 (Kerberos/Token)",
+                "malicious_trigger": "Detected (Anomalous IP)",
+                "unit": "flag",
+                "weight": 0.28,
+            },
+            {
+                "name": "tf_idf_log_novelty",
+                "label": "TF-IDF Log Template Outlier Distance",
+                "baseline": "0.08",
+                "malicious_trigger": "> 0.85 (Novel Event)",
+                "unit": "cosine distance",
+                "weight": 0.20,
+            },
+            {
+                "name": "normal_datanode_heartbeat",
+                "label": "DataNode Continuous Heartbeat Cadence",
+                "baseline": "3.0s Cadence",
+                "malicious_trigger": "Missing (> 30s)",
+                "unit": "seconds",
+                "weight": -0.16,
+            },
+        ],
+    },
 }
+
+
+def normalize_model_key(key: Optional[str]) -> str:
+    """Normalizes any free-form model name or ID into a canonical model spec key."""
+    if not key:
+        return "linux_ids"
+    k = str(key).lower().strip()
+    if "ember" in k or "pe" in k or "exe" in k or "binary" in k or "dropper" in k:
+        return "ember"
+    if "cicids" in k or "network" in k or "flow" in k or "pcap" in k or "scan" in k:
+        return "cicids"
+    if "window" in k or "ransomware" in k or "vss" in k or "shadow" in k:
+        return "windows_advanced"
+    if "zero" in k or "isolation" in k or "autoencoder" in k:
+        return "zero_day"
+    if "hdfs" in k or "hadoop" in k or "log" in k:
+        return "hdfs"
+    return "linux_ids"
 
 
 def explain_event_prediction(
@@ -292,12 +364,26 @@ def explain_event_prediction(
       - Counterfactual / What-If tipping points
     """
     event_data = event_data or {}
-    spec = MODEL_FEATURE_SPECS.get(model_key, MODEL_FEATURE_SPECS["linux_ids"])
+    canonical_key = normalize_model_key(model_key or event_data.get("model"))
+    spec = MODEL_FEATURE_SPECS.get(canonical_key, MODEL_FEATURE_SPECS["linux_ids"])
     
-    # Target score
+    # Target score safely parsed
     score = threat_score
+    if score is None and event_data:
+        score = (
+            event_data.get("threat_score")
+            or event_data.get("score")
+            or event_data.get("raw_threat_score")
+            or event_data.get("final_weighted_score")
+        )
     if score is None:
-        score = float(event_data.get("threat_score", 0.94))
+        score = 0.94
+    try:
+        score = float(score)
+        if score > 1.0 and score <= 100.0:
+            score = score / 100.0
+    except (ValueError, TypeError):
+        score = 0.94
     
     is_malicious = score >= 0.5
     base_value = 0.05 # Expected value of benign baseline
