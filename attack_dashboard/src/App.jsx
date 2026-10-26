@@ -58,7 +58,9 @@ const normalizePhase = (phase) => {
 };
 
 export default function App() {
-  const [gatewayUrl, setGatewayUrl] = useState("http://127.0.0.1:8000");
+  const [gatewayUrl, setGatewayUrl] = useState(
+    import.meta.env.VITE_COMMAND_NODE_URL || "http://127.0.0.1:8000"
+  );
   const [gatewayStatus, setGatewayStatus] = useState("CONNECTING");
   const [pingLatency, setPingLatency] = useState(null);
   const [activeTab, setActiveTab] = useState("operations"); // operations | terminal | defense | weaponization | reports
