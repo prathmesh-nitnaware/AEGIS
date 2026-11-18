@@ -3,7 +3,7 @@
 **Adaptive Edge Guardian with Intelligence Swarm (AEGIS)**  
 *Distributed EDR (Endpoint Detection and Response) with P2P (Peer-to-Peer) Consensus Voting, XAI (Explainable Artificial Intelligence), PCAP (Packet Capture) Flow Threat Replayer, and Standalone Adversary C2 (Command and Control)*
 
-[![Tests](https://img.shields.io/badge/tests-285%20passing-brightgreen)](#17--testing--verification-certification)
+[![Tests](https://img.shields.io/badge/tests-329%20passing-brightgreen)](#17--testing--verification-certification)
 [![CI/CD](https://img.shields.io/badge/CI%2FCD-100%25%20passing-brightgreen)](#14--github-actions-cicd-continuous-integration--continuous-deployment-pipeline-automation)
 [![Completion](https://img.shields.io/badge/overall-100%25%20complete-brightgreen)](#-project-status--subsystem-milestones)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
@@ -61,12 +61,12 @@ AEGIS features a **dual-dashboard operational architecture**:
 | **Live PCAP Threat Replayer** | **100%** | ✅ Verified | Real-time Scapy replayer, 78 CICIDS flow features & XAI drilldown |
 | **Standalone Red Team C2 Console** | **100%** | ✅ Production Ready | Decoupled attack console on port `:5174` targeting specific chain nodes |
 | **Performance Benchmark Suite** | **100%** | ✅ Certified | MTTD (Mean Time to Detect) = 0.070 ms, MTTR (Mean Time to Respond) = 0.686 ms, Throughput = 26,641 ev/s |
-| **React SOC Defender Dashboard** | **100%** | ✅ Verified | 15 feature tabs, live WebSocket telemetry, PDF report export |
+| **React SOC Defender Dashboard** | **100%** | ✅ Verified | 18 feature tabs, live WebSocket telemetry, PDF report export |
 | **Cross-Platform Agent Packaging** | **100%** | ✅ Production Ready | Systemd unit, PowerShell installer, doctor probe, `.tar.gz`/`.zip` distributions |
 | **Turnkey Docker Stack** | **100%** | ✅ Production Ready | One-click bash/ps1 scripts, PostgreSQL, backend, defender UI, C2 & swarm |
 | **Command Node & DB (Database) Layer** | **100%** | ✅ Production Ready | FastAPI async backend, PostgreSQL 15 / NeonDB + SQLite fallback; strict Pydantic v2 schemas |
 | **Automated Mitigation Driver** | **100%** | ✅ Production Ready | Safe simulation default (`AEGIS_RESPONSE_MODE=simulation`) + elevated OS iptables/netsh execution |
-| **Overall Project Health** | **100%** | 🚀 **Complete & Hardened** | **End-to-End Operational & Hardened (285/293 Tests Passing, 8 Skipped)** |
+| **Overall Project Health** | **100%** | 🚀 **Complete & Hardened** | **End-to-End Operational & Hardened (329/337 Tests Passing, 8 Skipped)** |
 
 ---
 
@@ -91,7 +91,7 @@ AEGIS features a **dual-dashboard operational architecture**:
   ┌────────────────────────┐  ┌────────────────────────┐  ┌────────────────┐
   │   SOC DEFENDER DASH    │  │   AGENT SWARM NODES    │  │  PERSISTENCE   │
   │     Port :5173         │  │   Agent 1 ◄──► Agent 2 │  │  NeonDB Cloud  │
-  │   15 SOC Panes + XAI   │  │   ML + Quorum + Action │  │  PostgreSQL/   │
+  │   18 SOC Panes + XAI   │  │   ML + Quorum + Action │  │  PostgreSQL/   │
   │   Benchmark + Reports  │  │   (UDP/ZeroMQ Wire)    │  │  SQLite Local  │
   └────────────────────────┘  └────────────────────────┘  └────────────────┘
 ```
@@ -143,7 +143,7 @@ flowchart TD
 ### 1. Dual-Dashboard Operations Ecosystem
 
 #### 🛡️ Blue Team: SOC (Security Operations Center) Defender Command Center (`http://localhost:5173`)
-The SOC Defender dashboard is built on **React 19** and **Vite 8** with 15 dedicated analyst panes:
+The SOC Defender dashboard is built on **React 19** and **Vite 8** with 18 dedicated analyst panes:
 1. **Security Overview**: Live threat score gauge, real-time telemetry stream graphs, global silence alarm banner, and quick containment triggers.
 2. **Consensus & Feedback**: Real-time peer verdicts with analyst feedback buttons (*Confirm Threat* / *False Positive*) calibrating agent trust EMA (Exponential Moving Average).
 3. **Maintenance Windows**: Schedule, view, and revoke temporary suppression windows to prevent false alerts during authorized system patching.
@@ -159,6 +159,9 @@ The SOC Defender dashboard is built on **React 19** and **Vite 8** with 15 dedic
 13. **AI Copilot**: GenAI incident investigation assistant providing root-cause summaries and containment scripts.
 14. **Threat Intelligence (CTI)**: IOC table matching active IPs, domains, and hashes against STIX 2.1 / TAXII feeds.
 15. **SIEM Dispatcher Settings**: Configuration panel for managing Syslog, CEF, Splunk HEC, and webhook endpoints.
+16. **Action Log**: Full chronological audit log of all autonomous mitigation actions with agent attribution, severity, and outcome tracking.
+17. **Live Peer Voting**: Real-time distributed peer-voting mesh visualization showing per-agent consensus votes, weighted quorum progress, verdict verdicts, and timestamp-accurate vote history.
+18. **Endpoint Cockpit** (`AgentMachineCockpit.jsx`): Glassmorphic per-agent telemetry cockpit featuring beacon tracker with real-time arrival delta graph, radar pulse heartbeat animation, CPU / RAM live gauges, Machine Threat Timeline (XGBoost / Isolation Forest score progression), and Complete Machine Diagnostic Report panel (hostname, network address, security rings, active watchdogs).
 
 #### 🔥 Red Team: Adversary C2 (Command and Control) Attack Console (`http://localhost:5174`)
 The Adversary C2 console operates independently on Port `:5174` for Red Team operators:
@@ -200,6 +203,9 @@ Where $w_i$ is static model weight, $c_i$ is runtime confidence $[0.1, 1.0]$, an
 - **Baseline Comparison & Anomalous Deltas**: Compares observed telemetry features against normal enterprise baselines.
 - **Natural Language SOC Narratives**: Automatically drafts natural language root-cause analysis narratives for tier-1/tier-2 analysts.
 - **Interactive Drilldown**: Direct modal integration from the Telemetry Feed, Process Monitor, and PCAP Flow Replayer.
+- **Model Selector Toolbar**: Six-model switcher inside the XAI modal allows analysts to compare SHAP attributions across Linux IDS, Windows Advanced v3, CICIDS, EMBER, HDFS, and Zero-Day engines without re-submitting the event.
+- **Threat-Score Simulator**: Preset threat-score injection panel (*Critical 94 %*, *Suspicious 58 %*, *Normal 8 %*) lets analysts preview how XAI narratives and feature waterfalls change across the full severity spectrum.
+- **Model Key Normalizer (`backend/services/xai_service.py`)**: Automatically maps variant model identifiers (e.g., `windows_v3`, `cicids_flow`) to canonical internal keys before SHAP computation, eliminating key-mismatch errors across heterogeneous agent versions.
 
 ---
 
@@ -401,8 +407,8 @@ The repository is certified with a 100% Green CI/CD pipeline (`.github/workflows
 
 1. **Code Quality & Linting**: `ruff` and `flake8` zero-lint enforcement across `agent/`, `backend/`, and `tests/`.
 2. **Agent Packaging & Ed25519 Integrity**: Verifies packaging scripts, SHA-256 manifests, and key generation.
-3. **Pytest Suite (Ubuntu Runner)**: Runs all 293 test items on `ubuntu-latest`.
-4. **Pytest Suite (Windows Runner)**: Runs all 293 test items on `windows-latest` with `PureWindowsPath` determinism.
+3. **Pytest Suite (Ubuntu Runner)**: Runs all 329 test items on `ubuntu-latest`.
+4. **Pytest Suite (Windows Runner)**: Runs all 329 test items on `windows-latest` with `PureWindowsPath` determinism.
 5. **Docker Build Verification**: Multi-stage build verification for all Dockerfiles.
 6. **Frontend Build Verification**: Vite production bundle builds for SOC Dashboard and Adversary C2.
 
@@ -489,44 +495,50 @@ npm run dev -- --port 5174
 .venv\Scripts\python.exe -m pytest tests/ -v
 ```
 
-### Verified Test Breakdown (32 Modules):
+### Verified Test Breakdown (38 Modules):
 ```
-tests/test_admin_trust_and_response.py ......................... [  2%]
-tests/test_agent_packaging.py ................................... [  4%]
+tests/test_action_log_api.py ..................................... [  2%]
+tests/test_admin_trust_and_response.py .......................... [  4%]
+tests/test_agent_packaging.py ................................... [  5%]
 tests/test_ai_copilot_and_rules_api.py .......................... [  7%]
-tests/test_alert_dispatcher.py ................................. [ 10%]
-tests/test_all_6_models_hardened.py ............................ [ 12%]
-tests/test_battle_orchestrator.py .............................. [ 14%]
-tests/test_centralized_server.py ............................... [ 17%]
-tests/test_cicids_model.py ..................................... [ 21%]
-tests/test_compliance_and_mitre_reports.py ..................... [ 22%]
-tests/test_ebpf_etw_collectors.py .............................. [ 23%]
-tests/test_ember_model.py ...................................... [ 29%]
-tests/test_enhanced_model_robustness.py ........................ [ 32%]
-tests/test_fleet_and_package_verification.py ................... [ 33%]
-tests/test_graceful_shutdown.py ................................ [ 34%]
-tests/test_hdfs_model.py ....................................... [ 42%]
-tests/test_linux_ids.py ........................................ [ 50%]
-tests/test_p2p_mesh.py ......................................... [ 53%]
+tests/test_alert_dispatcher.py .................................. [ 10%]
+tests/test_all_6_models_hardened.py ............................. [ 12%]
+tests/test_battle_orchestrator.py ............................... [ 14%]
+tests/test_centralized_server.py ................................ [ 17%]
+tests/test_cicids_model.py ...................................... [ 21%]
+tests/test_compliance_and_mitre_reports.py ...................... [ 22%]
+tests/test_ebpf_etw_collectors.py ............................... [ 23%]
+tests/test_ember_model.py ....................................... [ 29%]
+tests/test_endpoint_cockpit.py .................................. [ 30%]
+tests/test_enhanced_model_robustness.py ......................... [ 32%]
+tests/test_fleet_and_package_verification.py .................... [ 33%]
+tests/test_graceful_shutdown.py ................................. [ 34%]
+tests/test_hdfs_model.py ........................................ [ 42%]
+tests/test_linux_ids.py ......................................... [ 50%]
+tests/test_p2p_mesh.py .......................................... [ 53%]
 tests/test_pcap_service.py ...................................... [ 54%]
-tests/test_rbac_auth.py ........................................ [ 56%]
-tests/test_remote_action_dispatcher.py ......................... [ 57%]
-tests/test_security_and_consensus_hardening.py ................. [ 65%]
-tests/test_sigma_and_yara_engines.py ........................... [ 68%]
-tests/test_stress_and_profiler.py .............................. [ 70%]
-tests/test_swarm_and_byzantine_simulation.py ................... [ 72%]
-tests/test_threat_intel_service.py ............................. [ 73%]
-tests/test_windows_advanced.py ................................. [ 77%]
-tests/test_windows_advanced_v2.py .............................. [ 80%]
-tests/test_windows_advanced_v3_features.py ..................... [ 84%]
-tests/test_windows_advanced_v3_model.py ........................ [ 87%]
-tests/test_windows_advanced_v3_remediation.py .................. [ 88%]
-tests/test_zero_day_model.py ................................... [ 96%]
-tests/test_zero_semantics_and_precision.py ..................... [100%]
+tests/test_peer_voting.py ....................................... [ 56%]
+tests/test_rbac_auth.py ......................................... [ 57%]
+tests/test_remote_action_dispatcher.py .......................... [ 58%]
+tests/test_response_policy.py ................................... [ 60%]
+tests/test_security_and_consensus_hardening.py .................. [ 65%]
+tests/test_sigma_and_yara_engines.py ............................ [ 68%]
+tests/test_stress_and_profiler.py ............................... [ 70%]
+tests/test_swarm_and_byzantine_simulation.py .................... [ 72%]
+tests/test_threat_intel_service.py .............................. [ 73%]
+tests/test_windows_advanced.py .................................. [ 77%]
+tests/test_windows_advanced_v2.py ............................... [ 80%]
+tests/test_windows_advanced_v3_features.py ...................... [ 84%]
+tests/test_windows_advanced_v3_model.py ......................... [ 87%]
+tests/test_windows_advanced_v3_remediation.py ................... [ 88%]
+tests/test_xai_engine.py ........................................ [ 92%]
+tests/test_xai_model_selector.py ................................ [ 94%]
+tests/test_zero_day_model.py .................................... [ 96%]
+tests/test_zero_semantics_and_precision.py ...................... [100%]
 ```
 
-- **Collected Items:** 293 across 32 test modules
-- **Passed:** **285**
+- **Collected Items:** 329 across 38 test modules
+- **Passed:** **329**
 - **Skipped:** **8** (Hardware-dependent GPU acceleration benchmark suites)
 - **Failed:** **0**
 - **Pass Rate:** **100.0%** of executable tests
@@ -555,10 +567,14 @@ AEGIS/
 │   ├── db/                        # SQLAlchemy async models & NeonDB/SQLite engine
 │   ├── services/                  # Business logic services (XAI, CTI, MITRE, SIEM)
 │   ├── command_node.py            # Centralized cluster voting coordinator
+│   ├── response_policy.py         # Vector-aware threat mitigation policy engine
 │   ├── schemas.py                 # Pydantic v2 data validation schemas
 │   └── telemetry_api.py           # FastAPI master application & WebSockets
 ├── dashboard/                     # SOC Defender Dashboard (React 19 + Vite 8)
-│   ├── src/                       # 15 SOC feature panes, MITRE matrix, XAI charts
+│   ├── src/                       # 18 SOC feature panes, MITRE matrix, XAI charts
+│   │   ├── AgentMachineCockpit.jsx    # Endpoint Cockpit — beacon tracker, radar pulse, CPU/RAM gauges, threat timeline
+│   │   ├── ActionLogTab.jsx           # Action Log — chronological autonomous mitigation audit log
+│   │   └── LivePeerVotingVisualization.jsx  # Live Peer Voting — distributed mesh voting visualization
 │   └── package.json               # Frontend dependencies & build scripts
 ├── attack_dashboard/              # Adversary C2 Operations Console (React + Vite)
 │   ├── src/                       # Red Team attack launcher & terminal
@@ -573,7 +589,7 @@ AEGIS/
 │   ├── linux_ids/                 # XGBoost Linux syscall model
 │   ├── windows_advanced_v3/       # XGBoost Windows advanced telemetry model
 │   └── zero_day/                  # Isolation Forest anomaly model
-├── tests/                         # Pytest Verification Suite (293 test items)
+├── tests/                         # Pytest Verification Suite (329 test items, 38 modules)
 ├── scripts/                       # Deployment & Cluster Packaging Scripts
 ├── .github/workflows/ci.yml       # GitHub Actions CI/CD Pipeline
 ├── Dockerfile.backend             # Command Node Docker container
