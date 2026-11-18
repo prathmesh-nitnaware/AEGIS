@@ -599,8 +599,3 @@ AEGIS/
 └── docker-compose.yml             # Full-stack multi-node orchestration
 ```
 
----
-
-## 📜 License
-
-Project AEGIS is licensed under the **MIT License**. See the `LICENSE` file for details.
